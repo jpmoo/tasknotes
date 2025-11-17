@@ -18,6 +18,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 * Virtual scrolling activates when a quadrant has >= 50 tasks.
 	 */
 	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
+	/**
+	 * Fixed height for quadrants (approximately 20 task cards).
+	 * Each task card is ~45px + 8px gap = ~53px per card.
+	 * 20 cards × 53px = ~1060px, plus padding = ~1100px
+	 */
+	private readonly QUADRANT_FIXED_HEIGHT = 1100; // pixels
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -149,6 +155,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			border-radius: 8px;
 			background: var(--background-secondary);
 			overflow: hidden;
+			height: ${this.QUADRANT_FIXED_HEIGHT}px;
+			flex-shrink: 0;
 		`;
 
 		// Quadrant header
@@ -172,16 +180,20 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		count.style.cssText = "font-weight: normal; color: var(--text-muted); font-size: 12px;";
 		quadrant.appendChild(header);
 
-		// Tasks container
+		// Tasks container - fixed height with scrolling
 		const tasksContainer = document.createElement("div");
 		tasksContainer.className = "eisenhower-matrix__quadrant-tasks";
+		// Calculate available height: fixed quadrant height minus header height (~50px)
+		const headerHeight = 50;
+		const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
 		tasksContainer.style.cssText = `
-			flex: 1;
+			height: ${availableHeight}px;
 			overflow-y: auto;
 			padding: 8px;
 			display: flex;
 			flex-direction: column;
 			gap: 8px;
+			flex-shrink: 0;
 		`;
 
 		// Render task cards
@@ -264,13 +276,18 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		visibleProperties: string[],
 		cardOptions: any
 	): void {
-		// Make container scrollable
+		// Container height is already set by renderQuadrant, just ensure it's scrollable
+		// Calculate available height: fixed quadrant height minus header height (~50px)
+		const headerHeight = 50;
+		const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
 		tasksContainer.style.cssText = `
-			flex: 1;
+			height: ${availableHeight}px;
 			overflow-y: auto;
 			padding: 8px;
 			position: relative;
-			min-height: 0;
+			display: flex;
+			flex-direction: column;
+			flex-shrink: 0;
 		`;
 
 		// Clean up existing scroller for this quadrant if it exists

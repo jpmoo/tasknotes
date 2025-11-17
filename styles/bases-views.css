@@ -388,18 +388,18 @@
    EISENHOWER MATRIX VIEW
    ================================================ */
 
-/* Main matrix container - 2x2 grid */
+/* Main matrix container - 2x2 grid with fixed-height quadrants */
 .eisenhower-matrix {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: auto auto; /* Auto rows to fit fixed-height quadrants */
     gap: var(--tn-spacing-md);
-    height: 100%;
     padding: var(--tn-spacing-md);
     box-sizing: border-box;
+    align-content: start; /* Align grid items to start */
 }
 
-/* Individual quadrant */
+/* Individual quadrant - fixed height */
 .eisenhower-matrix__quadrant {
     display: flex;
     flex-direction: column;
@@ -407,7 +407,8 @@
     border-radius: var(--tn-radius-md);
     background: var(--background-secondary);
     overflow: hidden;
-    min-height: 200px;
+    height: 1100px; /* Fixed height for ~20 task cards */
+    flex-shrink: 0;
 }
 
 /* Quadrant header */
@@ -429,15 +430,15 @@
     font-size: var(--tn-font-size-sm);
 }
 
-/* Tasks container within quadrant */
+/* Tasks container within quadrant - fixed height with scroll */
 .eisenhower-matrix__quadrant-tasks {
-    flex: 1;
+    height: 1050px; /* Fixed height: 1100px quadrant - ~50px header */
     overflow-y: auto;
     padding: var(--tn-spacing-sm);
     display: flex;
     flex-direction: column;
     gap: var(--tn-spacing-xs);
-    min-height: 0; /* Important for flex scrolling */
+    flex-shrink: 0;
 }
 
 /* Empty state within quadrant */
