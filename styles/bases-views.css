@@ -383,3 +383,97 @@
         font-size: var(--tn-font-size-sm);
     }
 }
+
+/* ================================================
+   EISENHOWER MATRIX VIEW
+   ================================================ */
+
+/* Main matrix container - 2x2 grid */
+.eisenhower-matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: var(--tn-spacing-md);
+    height: 100%;
+    padding: var(--tn-spacing-md);
+    box-sizing: border-box;
+}
+
+/* Individual quadrant */
+.eisenhower-matrix__quadrant {
+    display: flex;
+    flex-direction: column;
+    border: 2px solid var(--background-modifier-border);
+    border-radius: var(--tn-radius-md);
+    background: var(--background-secondary);
+    overflow: hidden;
+    min-height: 200px;
+}
+
+/* Quadrant header */
+.eisenhower-matrix__quadrant-header {
+    padding: var(--tn-spacing-md);
+    font-weight: var(--tn-font-weight-semibold);
+    font-size: var(--tn-font-size-md);
+    border-bottom: 1px solid var(--background-modifier-border);
+    background: var(--background-primary-alt);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.eisenhower-matrix__quadrant-count {
+    font-weight: var(--tn-font-weight-normal);
+    color: var(--text-muted);
+    font-size: var(--tn-font-size-sm);
+}
+
+/* Tasks container within quadrant */
+.eisenhower-matrix__quadrant-tasks {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--tn-spacing-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--tn-spacing-xs);
+    min-height: 0; /* Important for flex scrolling */
+}
+
+/* Empty state within quadrant */
+.eisenhower-matrix__quadrant-empty {
+    padding: var(--tn-spacing-lg);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--tn-font-size-sm);
+}
+
+/* Quadrant-specific styling (optional - can be used for visual distinction) */
+.eisenhower-matrix__quadrant--urgent-important {
+    border-color: var(--text-error, #d73a49);
+}
+
+.eisenhower-matrix__quadrant--urgent-not-important {
+    border-color: var(--text-warning, #f39c12);
+}
+
+.eisenhower-matrix__quadrant--not-urgent-important {
+    border-color: var(--text-accent, #0366d6);
+}
+
+.eisenhower-matrix__quadrant--not-urgent-not-important {
+    border-color: var(--background-modifier-border);
+}
+
+/* Responsive design for Eisenhower matrix */
+@media (max-width: 768px) {
+    .eisenhower-matrix {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(4, auto);
+        gap: var(--tn-spacing-sm);
+    }
+
+    .eisenhower-matrix__quadrant {
+        min-height: 150px;
+    }
+}

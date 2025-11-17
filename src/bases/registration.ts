@@ -5,6 +5,7 @@ import { buildTaskListViewFactory } from "./TaskListView";
 import { buildKanbanViewFactory } from "./KanbanView";
 import { buildCalendarViewFactory } from "./CalendarView";
 import { buildMiniCalendarViewFactory } from "./MiniCalendarView";
+import { buildEisenhowerMatrixViewFactory } from "./EisenhowerMatrixView";
 import { registerBasesView, unregisterBasesView } from "./api";
 
 /**
@@ -424,8 +425,15 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 				],
 			});
 
+			// Register Eisenhower Matrix view using public API
+			const eisenhowerMatrixSuccess = registerBasesView(plugin, "tasknotesEisenhowerMatrix", {
+				name: "TaskNotes Eisenhower Matrix",
+				icon: "tasknotes-simple",
+				factory: buildEisenhowerMatrixViewFactory(plugin),
+			});
+
 			// Consider it successful if any view registered successfully
-			if (!taskListSuccess && !kanbanSuccess && !calendarSuccess && !miniCalendarSuccess) {
+			if (!taskListSuccess && !kanbanSuccess && !calendarSuccess && !miniCalendarSuccess && !eisenhowerMatrixSuccess) {
 				console.debug("[TaskNotes][Bases] Bases plugin not available for registration");
 				return false;
 			}
@@ -480,6 +488,7 @@ export function unregisterBasesViews(plugin: TaskNotesPlugin): void {
 		unregisterBasesView(plugin, "tasknotesKanban");
 		unregisterBasesView(plugin, "tasknotesCalendar");
 		unregisterBasesView(plugin, "tasknotesMiniCalendar");
+		unregisterBasesView(plugin, "tasknotesEisenhowerMatrix");
 	} catch (error) {
 		console.error("[TaskNotes][Bases] Error during view unregistration:", error);
 	}
