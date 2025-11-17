@@ -446,37 +446,37 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
 		const shouldHaveImportant = targetQuadrant === "urgent-important" || targetQuadrant === "not-urgent-important";
 
-		// Get current tags (normalize to include # if missing)
-		const currentTags = (task.tags || []).map(t => t.startsWith("#") ? t : `#${t}`);
+		// Get current tags (remove # prefix for storage - tags in frontmatter don't have #)
+		const currentTags = (task.tags || []).map(t => t.startsWith("#") ? t.substring(1) : t);
 		
-		// Normalize tag names for comparison
-		const normalizedUrgent = "#urgent";
-		const normalizedImportant = "#important";
+		// Tag names without # prefix (as they should be stored in frontmatter)
+		const tagUrgent = "urgent";
+		const tagImportant = "important";
 
-		// Check current state
-		const hasUrgent = currentTags.some(t => t.toLowerCase() === normalizedUrgent.toLowerCase());
-		const hasImportant = currentTags.some(t => t.toLowerCase() === normalizedImportant.toLowerCase());
+		// Check current state (case-insensitive comparison)
+		const hasUrgent = currentTags.some(t => t.toLowerCase() === tagUrgent.toLowerCase());
+		const hasImportant = currentTags.some(t => t.toLowerCase() === tagImportant.toLowerCase());
 
 		// Build new tags array
 		const newTags: string[] = [];
 		
-		// Keep all existing tags except #urgent and #important
+		// Keep all existing tags except urgent and important
 		for (const tag of currentTags) {
 			const normalized = tag.toLowerCase();
-			if (normalized !== normalizedUrgent.toLowerCase() && normalized !== normalizedImportant.toLowerCase()) {
-				newTags.push(tag);
+			if (normalized !== tagUrgent.toLowerCase() && normalized !== tagImportant.toLowerCase()) {
+				newTags.push(tag); // Keep original case
 			}
 		}
 
-		// Add tags based on target quadrant
+		// Add tags based on target quadrant (without # prefix)
 		if (shouldHaveUrgent && !hasUrgent) {
-			newTags.push(normalizedUrgent);
+			newTags.push(tagUrgent);
 		}
 		if (shouldHaveImportant && !hasImportant) {
-			newTags.push(normalizedImportant);
+			newTags.push(tagImportant);
 		}
 
-		// Update the task tags
+		// Update the task tags (tags should be stored without # prefix in frontmatter)
 		await this.plugin.updateTaskProperty(task, "tags", newTags.length > 0 ? newTags : undefined);
 	}
 
