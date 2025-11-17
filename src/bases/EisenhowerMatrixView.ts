@@ -7,7 +7,7 @@ import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
 import { TFile } from "obsidian";
 
-type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important";
+type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen";
 
 export class EisenhowerMatrixView extends BasesViewBase {
 	type = "tasknoteEisenhowerMatrix";
@@ -20,11 +20,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
 	/**
-	 * Fixed height for quadrants (approximately 10 task cards).
+	 * Fixed height for quadrants (approximately 5 task cards).
 	 * Each task card is ~45px + 8px gap = ~53px per card.
-	 * 10 cards × 53px = ~530px, plus padding = ~550px
+	 * 5 cards × 53px = ~265px, plus padding = ~275px
 	 */
-	private readonly QUADRANT_FIXED_HEIGHT = 550; // pixels
+	private readonly QUADRANT_FIXED_HEIGHT = 275; // pixels
 	private draggedTaskPath: string | null = null;
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
@@ -35,10 +35,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	protected setupContainer(): void {
 		super.setupContainer();
 
-		// Create matrix container
+		// Create matrix container - 2x2 grid for quadrants + holding pen below
 		const matrix = document.createElement("div");
 		matrix.className = "eisenhower-matrix";
-		matrix.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; height: 100%; padding: 12px;";
+		matrix.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 12px; height: 100%; padding: 12px;";
 		this.rootElement?.appendChild(matrix);
 		this.matrixContainer = matrix;
 	}
@@ -79,10 +79,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const quadrants = this.categorizeTasks(taskNotes);
 
 			// Render each quadrant
-			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important");
-			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important");
-			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important");
-			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important");
+			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO");
+			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DECIDE");
+			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DELEGATE");
+			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DELETE");
+			// Render holding pen (spans full width below the matrix)
+			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Holding Pen (No Tags)");
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
 			this.renderError(error);
@@ -90,34 +92,52 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
-	 * Categorize tasks into quadrants based on #urgent and #important tags
+	 * Categorize tasks into quadrants based on +important, -important, +urgent, -urgent tags
+	 * Tasks with none of these tags go to the holding pen
 	 */
 	private categorizeTasks(tasks: TaskInfo[]): {
 		urgentImportant: TaskInfo[];
 		urgentNotImportant: TaskInfo[];
 		notUrgentImportant: TaskInfo[];
 		notUrgentNotImportant: TaskInfo[];
+		holdingPen: TaskInfo[];
 	} {
 		const quadrants = {
 			urgentImportant: [] as TaskInfo[],
 			urgentNotImportant: [] as TaskInfo[],
 			notUrgentImportant: [] as TaskInfo[],
 			notUrgentNotImportant: [] as TaskInfo[],
+			holdingPen: [] as TaskInfo[],
 		};
 
 		for (const task of tasks) {
-			const hasUrgent = this.hasTag(task, "#urgent");
-			const hasImportant = this.hasTag(task, "#important");
+			const hasPlusImportant = this.hasTag(task, "+important");
+			const hasMinusImportant = this.hasTag(task, "-important");
+			const hasPlusUrgent = this.hasTag(task, "+urgent");
+			const hasMinusUrgent = this.hasTag(task, "-urgent");
 
-			if (hasUrgent && hasImportant) {
-				quadrants.urgentImportant.push(task);
-			} else if (hasUrgent && !hasImportant) {
-				quadrants.urgentNotImportant.push(task);
-			} else if (!hasUrgent && hasImportant) {
-				quadrants.notUrgentImportant.push(task);
+			// Check if task has any of the four tags
+			const hasAnyTag = hasPlusImportant || hasMinusImportant || hasPlusUrgent || hasMinusUrgent;
+
+			if (!hasAnyTag) {
+				// No tags → holding pen
+				quadrants.holdingPen.push(task);
 			} else {
-				// Neither tag
-				quadrants.notUrgentNotImportant.push(task);
+				// Determine quadrant based on tags
+				// Negative tags override positive ones
+				const isUrgent = hasPlusUrgent && !hasMinusUrgent;
+				const isImportant = hasPlusImportant && !hasMinusImportant;
+
+				if (isUrgent && isImportant) {
+					quadrants.urgentImportant.push(task);
+				} else if (isUrgent && !isImportant) {
+					quadrants.urgentNotImportant.push(task);
+				} else if (!isUrgent && isImportant) {
+					quadrants.notUrgentImportant.push(task);
+				} else {
+					// Neither urgent nor important (or has negative tags)
+					quadrants.notUrgentNotImportant.push(task);
+				}
 			}
 
 			// Cache task info
@@ -135,9 +155,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			return false;
 		}
 		// Normalize tag comparison (handle both with and without #)
-		const normalizedTag = tag.startsWith("#") ? tag : `#${tag}`;
+		const normalizedTag = tag.startsWith("#") ? tag.substring(1) : tag;
 		return task.tags.some((t) => {
-			const normalized = t.startsWith("#") ? t : `#${t}`;
+			const normalized = t.startsWith("#") ? t.substring(1) : t;
 			return normalized.toLowerCase() === normalizedTag.toLowerCase();
 		});
 	}
@@ -145,12 +165,14 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	/**
 	 * Render a single quadrant
 	 */
-	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string): void {
+	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string, backgroundLabel?: string): void {
 		if (!this.matrixContainer) return;
 
 		const quadrant = document.createElement("div");
 		quadrant.className = `eisenhower-matrix__quadrant eisenhower-matrix__quadrant--${quadrantId}`;
-		quadrant.style.cssText = `
+		
+		// Base styles for all quadrants
+		let quadrantStyle = `
 			display: flex;
 			flex-direction: column;
 			border: 2px solid var(--background-modifier-border);
@@ -159,7 +181,37 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			overflow: hidden;
 			height: ${this.QUADRANT_FIXED_HEIGHT}px;
 			flex-shrink: 0;
+			position: relative;
 		`;
+		
+		// Special styling for holding pen (spans full width)
+		if (quadrantId === "holding-pen") {
+			quadrantStyle += `grid-column: 1 / -1;`;
+		}
+		
+		quadrant.style.cssText = quadrantStyle;
+		
+		// Add background label if provided
+		if (backgroundLabel) {
+			const label = document.createElement("div");
+			label.className = "eisenhower-matrix__background-label";
+			label.textContent = backgroundLabel;
+			label.style.cssText = `
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				font-size: 120px;
+				font-weight: 700;
+				color: var(--text-muted);
+				opacity: 0.08;
+				pointer-events: none;
+				user-select: none;
+				z-index: 0;
+				white-space: nowrap;
+			`;
+			quadrant.appendChild(label);
+		}
 
 		// Quadrant header
 		const header = document.createElement("div");
@@ -173,6 +225,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
+			position: relative;
+			z-index: 1;
 		`;
 		header.createSpan({ text: title });
 		const count = header.createSpan({
@@ -196,6 +250,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			flex-direction: column;
 			gap: 8px;
 			flex-shrink: 0;
+			position: relative;
+			z-index: 1;
 		`;
 
 		// Render task cards
@@ -442,39 +498,47 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	private async updateTaskTagsForQuadrant(task: TaskInfo, targetQuadrant: Quadrant): Promise<void> {
-		// Determine which tags should be present based on target quadrant
-		const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
-		const shouldHaveImportant = targetQuadrant === "urgent-important" || targetQuadrant === "not-urgent-important";
-
 		// Get current tags (remove # prefix for storage - tags in frontmatter don't have #)
 		const currentTags = (task.tags || []).map(t => t.startsWith("#") ? t.substring(1) : t);
 		
-		// Tag names without # prefix (as they should be stored in frontmatter)
-		const tagUrgent = "urgent";
-		const tagImportant = "important";
-
-		// Check current state (case-insensitive comparison)
-		const hasUrgent = currentTags.some(t => t.toLowerCase() === tagUrgent.toLowerCase());
-		const hasImportant = currentTags.some(t => t.toLowerCase() === tagImportant.toLowerCase());
+		// Tag names (without # prefix, as they should be stored in frontmatter)
+		const tagPlusUrgent = "+urgent";
+		const tagMinusUrgent = "-urgent";
+		const tagPlusImportant = "+important";
+		const tagMinusImportant = "-important";
 
 		// Build new tags array
 		const newTags: string[] = [];
 		
-		// Keep all existing tags except urgent and important (we'll add them back if needed)
+		// Keep all existing tags except the four eisenhower tags (we'll add them back if needed)
 		for (const tag of currentTags) {
 			const normalized = tag.toLowerCase();
-			if (normalized !== tagUrgent.toLowerCase() && normalized !== tagImportant.toLowerCase()) {
+			if (
+				normalized !== tagPlusUrgent.toLowerCase() &&
+				normalized !== tagMinusUrgent.toLowerCase() &&
+				normalized !== tagPlusImportant.toLowerCase() &&
+				normalized !== tagMinusImportant.toLowerCase()
+			) {
 				newTags.push(tag); // Keep original case
 			}
 		}
 
-		// Add tags based on target quadrant (without # prefix)
-		// Only add if we should have it (regardless of current state, since we've already removed them)
-		if (shouldHaveUrgent) {
-			newTags.push(tagUrgent);
-		}
-		if (shouldHaveImportant) {
-			newTags.push(tagImportant);
+		// Add tags based on target quadrant
+		if (targetQuadrant === "holding-pen") {
+			// Remove all eisenhower tags (already filtered above)
+			// Don't add any tags
+		} else {
+			// Determine which tags should be present based on target quadrant
+			const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
+			const shouldHaveImportant = targetQuadrant === "urgent-important" || targetQuadrant === "not-urgent-important";
+
+			// Add appropriate tags
+			if (shouldHaveUrgent) {
+				newTags.push(tagPlusUrgent);
+			}
+			if (shouldHaveImportant) {
+				newTags.push(tagPlusImportant);
+			}
 		}
 
 		// Use updateTask instead of updateTaskProperty because tags is not in FieldMapping

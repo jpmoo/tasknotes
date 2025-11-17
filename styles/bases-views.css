@@ -388,11 +388,11 @@
    EISENHOWER MATRIX VIEW
    ================================================ */
 
-/* Main matrix container - 2x2 grid with fixed-height quadrants */
+/* Main matrix container - 2x2 grid with fixed-height quadrants + holding pen */
 .eisenhower-matrix {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto; /* Auto rows to fit fixed-height quadrants */
+    grid-template-rows: auto auto auto; /* 2 rows for matrix + 1 row for holding pen */
     gap: var(--tn-spacing-md);
     padding: var(--tn-spacing-md);
     box-sizing: border-box;
@@ -407,7 +407,7 @@
     border-radius: var(--tn-radius-md);
     background: var(--background-secondary);
     overflow: hidden;
-    height: 550px; /* Fixed height for ~10 task cards */
+    height: 275px; /* Fixed height for ~5 task cards */
     flex-shrink: 0;
     transition: all 0.2s ease;
 }
@@ -440,7 +440,7 @@
 
 /* Tasks container within quadrant - fixed height with scroll */
 .eisenhower-matrix__quadrant-tasks {
-    height: 500px; /* Fixed height: 550px quadrant - ~50px header */
+    height: 225px; /* Fixed height: 275px quadrant - ~50px header */
     overflow-y: auto;
     padding: var(--tn-spacing-sm);
     display: flex;
@@ -471,32 +471,47 @@
     font-size: var(--tn-font-size-sm);
 }
 
-/* Quadrant-specific styling (optional - can be used for visual distinction) */
+/* Quadrant-specific styling with subtle background colors */
 .eisenhower-matrix__quadrant--urgent-important {
     border-color: var(--text-error, #d73a49);
+    background: rgba(34, 139, 34, 0.05) !important; /* Subtle green */
 }
 
 .eisenhower-matrix__quadrant--urgent-not-important {
     border-color: var(--text-warning, #f39c12);
+    background: rgba(255, 165, 0, 0.05) !important; /* Subtle orange */
 }
 
 .eisenhower-matrix__quadrant--not-urgent-important {
     border-color: var(--text-accent, #0366d6);
+    background: rgba(0, 102, 204, 0.05) !important; /* Subtle blue */
 }
 
 .eisenhower-matrix__quadrant--not-urgent-not-important {
     border-color: var(--background-modifier-border);
+    background: rgba(220, 20, 60, 0.05) !important; /* Subtle red */
+}
+
+/* Holding pen quadrant - spans full width */
+.eisenhower-matrix__quadrant--holding-pen {
+    grid-column: 1 / -1;
+    border-color: var(--text-muted, #808080);
+    border-style: dashed;
 }
 
 /* Responsive design for Eisenhower matrix */
 @media (max-width: 768px) {
     .eisenhower-matrix {
         grid-template-columns: 1fr;
-        grid-template-rows: repeat(4, auto);
+        grid-template-rows: repeat(5, auto);
         gap: var(--tn-spacing-sm);
     }
 
     .eisenhower-matrix__quadrant {
         min-height: 150px;
+    }
+    
+    .eisenhower-matrix__quadrant--holding-pen {
+        grid-column: 1;
     }
 }
