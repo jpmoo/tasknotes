@@ -460,7 +460,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		// Build new tags array
 		const newTags: string[] = [];
 		
-		// Keep all existing tags except urgent and important
+		// Keep all existing tags except urgent and important (we'll add them back if needed)
 		for (const tag of currentTags) {
 			const normalized = tag.toLowerCase();
 			if (normalized !== tagUrgent.toLowerCase() && normalized !== tagImportant.toLowerCase()) {
@@ -469,10 +469,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 
 		// Add tags based on target quadrant (without # prefix)
-		if (shouldHaveUrgent && !hasUrgent) {
+		// Only add if we should have it (regardless of current state, since we've already removed them)
+		if (shouldHaveUrgent) {
 			newTags.push(tagUrgent);
 		}
-		if (shouldHaveImportant && !hasImportant) {
+		if (shouldHaveImportant) {
 			newTags.push(tagImportant);
 		}
 
