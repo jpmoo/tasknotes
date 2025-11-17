@@ -4,6 +4,7 @@ import { BasesViewBase } from "./BasesViewBase";
 import { TaskInfo } from "../types";
 import { identifyTaskNotesFromBasesData } from "./helpers";
 import { createTaskCard } from "../ui/TaskCard";
+import { VirtualScroller } from "../utils/VirtualScroller";
 
 type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important";
 
@@ -11,6 +12,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	type = "tasknoteEisenhowerMatrix";
 	private matrixContainer: HTMLElement | null = null;
 	private taskInfoCache = new Map<string, TaskInfo>();
+	private quadrantScrollers = new Map<string, VirtualScroller<TaskInfo>>();
+	/**
+	 * Threshold for enabling virtual scrolling in quadrants.
+	 * Virtual scrolling activates when a quadrant has >= 50 tasks.
+	 */
+	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -49,6 +56,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 			const taskNotes = await identifyTaskNotesFromBasesData(dataItems, this.plugin);
 
+			// Clean up existing scrollers
+			this.destroyQuadrantScrollers();
+			
 			// Clear matrix
 			this.matrixContainer.empty();
 
@@ -189,10 +199,20 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			`;
 			empty.textContent = "No tasks";
 			tasksContainer.appendChild(empty);
+		} else if (tasks.length >= this.VIRTUAL_SCROLL_THRESHOLD) {
+			// Use virtual scrolling for large quadrants
+			this.createVirtualQuadrant(tasksContainer, quadrantId, tasks, visibleProperties, cardOptions);
 		} else {
+			// Render normally for smaller quadrants
 			for (const task of tasks) {
-				const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
-				tasksContainer.appendChild(card);
+				try {
+					const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
+					tasksContainer.appendChild(card);
+					this.taskInfoCache.set(task.path, task);
+				} catch (error) {
+					console.error(`[TaskNotes][EisenhowerMatrixView] Error creating card for ${task.path}:`, error);
+					// Continue with next task instead of crashing
+				}
 			}
 		}
 
@@ -237,12 +257,75 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		this.debouncedRefresh();
 	}
 
+	private createVirtualQuadrant(
+		tasksContainer: HTMLElement,
+		quadrantId: string,
+		tasks: TaskInfo[],
+		visibleProperties: string[],
+		cardOptions: any
+	): void {
+		// Make container scrollable
+		tasksContainer.style.cssText = `
+			flex: 1;
+			overflow-y: auto;
+			padding: 8px;
+			position: relative;
+			min-height: 0;
+		`;
+
+		// Clean up existing scroller for this quadrant if it exists
+		const existingScroller = this.quadrantScrollers.get(quadrantId);
+		if (existingScroller) {
+			existingScroller.destroy();
+		}
+
+		const scroller = new VirtualScroller<TaskInfo>({
+			container: tasksContainer,
+			items: tasks,
+			overscan: 3,
+			renderItem: (task: TaskInfo) => {
+				try {
+					const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
+					this.taskInfoCache.set(task.path, task);
+					return card;
+				} catch (error) {
+					console.error(`[TaskNotes][EisenhowerMatrixView] Error creating card for ${task.path}:`, error);
+					// Return empty div as fallback
+					const fallback = document.createElement("div");
+					fallback.textContent = `Error loading task: ${task.title || task.path}`;
+					fallback.style.cssText = "padding: 8px; color: var(--text-error);";
+					return fallback;
+				}
+			},
+			getItemKey: (task: TaskInfo) => task.path,
+		});
+
+		this.quadrantScrollers.set(quadrantId, scroller);
+	}
+
 	private getCardOptions() {
 		const now = new Date();
 		const targetDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 		return {
 			targetDate,
 		};
+	}
+
+	private destroyQuadrantScrollers(): void {
+		for (const scroller of this.quadrantScrollers.values()) {
+			scroller.destroy();
+		}
+		this.quadrantScrollers.clear();
+	}
+
+	/**
+	 * Component lifecycle: Called when component is unloaded.
+	 */
+	onunload(): void {
+		// Clean up virtual scrollers
+		this.destroyQuadrantScrollers();
+		this.taskInfoCache.clear();
+		this.matrixContainer = null;
 	}
 }
 
