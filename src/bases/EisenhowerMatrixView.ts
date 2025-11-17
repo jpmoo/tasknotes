@@ -476,8 +476,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			newTags.push(tagImportant);
 		}
 
-		// Update the task tags (tags should be stored without # prefix in frontmatter)
-		await this.plugin.updateTaskProperty(task, "tags", newTags.length > 0 ? newTags : undefined);
+		// Use updateTask instead of updateTaskProperty because tags is not in FieldMapping
+		// updateTask has special handling for tags that writes to frontmatter.tags correctly
+		await this.plugin.taskService.updateTask(task, {
+			tags: newTags.length > 0 ? newTags : undefined
+		});
 	}
 
 	private destroyQuadrantScrollers(): void {
