@@ -1,6 +1,6 @@
 {
-	"id": "tasknotes",
-	"name": "TaskNotes",
+	"id": "tasknotes-fork",
+	"name": "TaskNotes Fork",
 	"version": "3.25.6",
 	"minAppVersion": "1.9.0",
 	"description": "Note-based task management with calendar, pomodoro and time-tracking integration.",
