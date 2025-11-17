@@ -388,11 +388,11 @@
    EISENHOWER MATRIX VIEW
    ================================================ */
 
-/* Main matrix container - 2x2 grid with fixed-height quadrants + holding pen */
+/* Main matrix container - 2x2 grid with fixed-height quadrants + uncategorized region */
 .eisenhower-matrix {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto auto; /* 2 rows for matrix + 1 row for holding pen */
+    grid-template-rows: auto auto auto; /* 2 rows for matrix + 1 row for uncategorized */
     gap: var(--tn-spacing-md);
     padding: var(--tn-spacing-md);
     box-sizing: border-box;
@@ -492,7 +492,7 @@
     background: rgba(220, 20, 60, 0.05) !important; /* Subtle red */
 }
 
-/* Holding pen quadrant - spans full width */
+/* Uncategorized region - spans full width */
 .eisenhower-matrix__quadrant--holding-pen {
     grid-column: 1 / -1;
     border-color: var(--text-muted, #808080);

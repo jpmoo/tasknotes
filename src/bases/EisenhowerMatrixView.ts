@@ -35,7 +35,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	protected setupContainer(): void {
 		super.setupContainer();
 
-		// Create matrix container - 2x2 grid for quadrants + holding pen below
+		// Create matrix container - 2x2 grid for quadrants + uncategorized region below
 		const matrix = document.createElement("div");
 		matrix.className = "eisenhower-matrix";
 		matrix.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 12px; height: 100%; padding: 12px;";
@@ -82,9 +82,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO");
 			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DECIDE");
 			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DELEGATE");
-			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DELETE");
-			// Render holding pen (spans full width below the matrix)
-			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Holding Pen (No Tags)");
+			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER");
+			// Render uncategorized region (spans full width below the matrix)
+			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized");
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
 			this.renderError(error);
@@ -93,7 +93,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 	/**
 	 * Categorize tasks into quadrants based on +important, -important, +urgent, -urgent tags
-	 * Tasks with none of these tags go to the holding pen
+	 * Tasks with none of these tags go to the uncategorized region
 	 */
 	private categorizeTasks(tasks: TaskInfo[]): {
 		urgentImportant: TaskInfo[];
@@ -120,7 +120,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const hasAnyTag = hasPlusImportant || hasMinusImportant || hasPlusUrgent || hasMinusUrgent;
 
 			if (!hasAnyTag) {
-				// No tags → holding pen
+				// No tags → uncategorized
 				quadrants.holdingPen.push(task);
 			} else {
 				// Determine quadrant based on tags
@@ -184,7 +184,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			position: relative;
 		`;
 		
-		// Special styling for holding pen (spans full width)
+		// Special styling for uncategorized region (spans full width)
 		if (quadrantId === "holding-pen") {
 			quadrantStyle += `grid-column: 1 / -1;`;
 		}
@@ -201,7 +201,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				top: 50%;
 				left: 50%;
 				transform: translate(-50%, -50%);
-				font-size: 120px;
+				font-size: 90px;
 				font-weight: 700;
 				color: var(--text-muted);
 				opacity: 0.08;
@@ -209,6 +209,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				user-select: none;
 				z-index: 0;
 				white-space: nowrap;
+				line-height: 1;
+				display: flex;
+				align-items: center;
+				justify-content: center;
 			`;
 			quadrant.appendChild(label);
 		}
@@ -526,7 +530,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		// Add tags based on target quadrant
 		if (targetQuadrant === "holding-pen") {
 			// Remove all eisenhower tags (already filtered above)
-			// Don't add any tags
+			// Don't add any tags - task remains uncategorized
 		} else {
 			// Determine which tags should be present based on target quadrant
 			const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
