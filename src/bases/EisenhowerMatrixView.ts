@@ -196,15 +196,19 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const label = document.createElement("div");
 			label.className = "eisenhower-matrix__background-label";
 			label.textContent = backgroundLabel;
+			// Calculate center position of tasks area (excluding header)
+			const headerHeight = 50;
+			const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
+			const tasksAreaCenter = headerHeight + (availableHeight / 2);
 			label.style.cssText = `
 				position: absolute;
-				top: 50%;
+				top: ${tasksAreaCenter}px;
 				left: 50%;
 				transform: translate(-50%, -50%);
 				font-size: 90px;
 				font-weight: 700;
 				color: var(--text-muted);
-				opacity: 0.08;
+				opacity: 0.04;
 				pointer-events: none;
 				user-select: none;
 				z-index: 0;
