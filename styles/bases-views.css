@@ -478,13 +478,13 @@
 }
 
 .eisenhower-matrix__quadrant--urgent-not-important {
-    border-color: var(--text-warning, #f39c12);
-    background: rgba(255, 165, 0, 0.05) !important; /* Subtle orange */
+    border-color: var(--text-accent, #0366d6);
+    background: rgba(0, 102, 204, 0.05) !important; /* Subtle blue */
 }
 
 .eisenhower-matrix__quadrant--not-urgent-important {
-    border-color: var(--text-accent, #0366d6);
-    background: rgba(0, 102, 204, 0.05) !important; /* Subtle blue */
+    border-color: var(--text-warning, #f39c12);
+    background: rgba(255, 165, 0, 0.05) !important; /* Subtle orange */
 }
 
 .eisenhower-matrix__quadrant--not-urgent-not-important {

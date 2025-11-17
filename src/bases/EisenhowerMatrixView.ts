@@ -78,10 +78,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Categorize tasks into quadrants
 			const quadrants = this.categorizeTasks(taskNotes);
 
-			// Render each quadrant
+			// Render each quadrant - top row: Important quadrants, bottom row: Not Important quadrants
 			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO");
-			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DECIDE");
-			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DELEGATE");
+			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE");
+			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE");
 			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER");
 			// Render uncategorized region (spans full width below the matrix)
 			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized");
