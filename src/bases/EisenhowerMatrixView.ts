@@ -92,7 +92,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
-	 * Categorize tasks into quadrants based on +important, -important, +urgent, -urgent tags
+	 * Categorize tasks into quadrants based on yUrgent, nUrgent, yImportant, nImportant tags
 	 * Tasks with none of these tags go to the uncategorized region
 	 */
 	private categorizeTasks(tasks: TaskInfo[]): {
@@ -111,22 +111,22 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		};
 
 		for (const task of tasks) {
-			const hasPlusImportant = this.hasTag(task, "+important");
-			const hasMinusImportant = this.hasTag(task, "-important");
-			const hasPlusUrgent = this.hasTag(task, "+urgent");
-			const hasMinusUrgent = this.hasTag(task, "-urgent");
+			const hasYImportant = this.hasTag(task, "yImportant");
+			const hasNImportant = this.hasTag(task, "nImportant");
+			const hasYUrgent = this.hasTag(task, "yUrgent");
+			const hasNUrgent = this.hasTag(task, "nUrgent");
 
 			// Check if task has any of the four tags
-			const hasAnyTag = hasPlusImportant || hasMinusImportant || hasPlusUrgent || hasMinusUrgent;
+			const hasAnyTag = hasYImportant || hasNImportant || hasYUrgent || hasNUrgent;
 
 			if (!hasAnyTag) {
 				// No tags → uncategorized
 				quadrants.holdingPen.push(task);
 			} else {
 				// Determine quadrant based on tags
-				// Negative tags override positive ones
-				const isUrgent = hasPlusUrgent && !hasMinusUrgent;
-				const isImportant = hasPlusImportant && !hasMinusImportant;
+				// n tags override y tags (explicit negative takes precedence)
+				const isUrgent = hasYUrgent && !hasNUrgent;
+				const isImportant = hasYImportant && !hasNImportant;
 
 				if (isUrgent && isImportant) {
 					quadrants.urgentImportant.push(task);
@@ -506,10 +506,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		const currentTags = (task.tags || []).map(t => t.startsWith("#") ? t.substring(1) : t);
 		
 		// Tag names (without # prefix, as they should be stored in frontmatter)
-		const tagPlusUrgent = "+urgent";
-		const tagMinusUrgent = "-urgent";
-		const tagPlusImportant = "+important";
-		const tagMinusImportant = "-important";
+		const tagYUrgent = "yUrgent";
+		const tagNUrgent = "nUrgent";
+		const tagYImportant = "yImportant";
+		const tagNImportant = "nImportant";
 
 		// Build new tags array
 		const newTags: string[] = [];
@@ -518,16 +518,16 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		for (const tag of currentTags) {
 			const normalized = tag.toLowerCase();
 			if (
-				normalized !== tagPlusUrgent.toLowerCase() &&
-				normalized !== tagMinusUrgent.toLowerCase() &&
-				normalized !== tagPlusImportant.toLowerCase() &&
-				normalized !== tagMinusImportant.toLowerCase()
+				normalized !== tagYUrgent.toLowerCase() &&
+				normalized !== tagNUrgent.toLowerCase() &&
+				normalized !== tagYImportant.toLowerCase() &&
+				normalized !== tagNImportant.toLowerCase()
 			) {
 				newTags.push(tag); // Keep original case
 			}
 		}
 
-		// Add tags based on target quadrant
+		// Add tags based on target quadrant - use all 4 tags to be explicit
 		if (targetQuadrant === "holding-pen") {
 			// Remove all eisenhower tags (already filtered above)
 			// Don't add any tags - task remains uncategorized
@@ -536,12 +536,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
 			const shouldHaveImportant = targetQuadrant === "urgent-important" || targetQuadrant === "not-urgent-important";
 
-			// Add appropriate tags
+			// Add all 4 tags explicitly - set the appropriate y/n tags and remove the opposite ones
 			if (shouldHaveUrgent) {
-				newTags.push(tagPlusUrgent);
+				newTags.push(tagYUrgent);
+				// Don't add nUrgent (explicitly not urgent)
+			} else {
+				newTags.push(tagNUrgent);
+				// Don't add yUrgent (explicitly not urgent)
 			}
+			
 			if (shouldHaveImportant) {
-				newTags.push(tagPlusImportant);
+				newTags.push(tagYImportant);
+				// Don't add nImportant (explicitly not important)
+			} else {
+				newTags.push(tagNImportant);
+				// Don't add yImportant (explicitly not important)
 			}
 		}
 
