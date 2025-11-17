@@ -29,11 +29,24 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	async render(): Promise<void> {
-		if (!this.matrixContainer || !this.rootElement) return;
-		if (!this.data?.data) return;
+		if (!this.rootElement) return;
+		if (!this.matrixContainer) {
+			// Container not set up yet, try to set it up
+			this.setupContainer();
+		}
+		if (!this.matrixContainer) return;
+		if (!this.data) return;
+		if (!this.data.data || !Array.isArray(this.data.data)) {
+			// Data not ready yet
+			return;
+		}
 
 		try {
 			const dataItems = this.dataAdapter.extractDataItems();
+			if (!dataItems || dataItems.length === 0) {
+				this.renderEmptyState();
+				return;
+			}
 			const taskNotes = await identifyTaskNotesFromBasesData(dataItems, this.plugin);
 
 			// Clear matrix

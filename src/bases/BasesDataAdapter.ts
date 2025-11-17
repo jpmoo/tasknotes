@@ -12,15 +12,20 @@ export class BasesDataAdapter {
 	 * Uses public API: basesView.data.data
 	 */
 	extractDataItems(): BasesDataItem[] {
+		if (!this.basesView?.data?.data || !Array.isArray(this.basesView.data.data)) {
+			return [];
+		}
 		const entries = this.basesView.data.data;
-		return entries.map((entry: any) => ({
-			key: entry.file.path,
-			data: entry,
-			file: entry.file,
-			path: entry.file.path,
-			properties: this.extractEntryProperties(entry),
-			basesData: entry,
-		}));
+		return entries
+			.filter((entry: any) => entry?.file?.path) // Filter out invalid entries
+			.map((entry: any) => ({
+				key: entry.file.path,
+				data: entry,
+				file: entry.file,
+				path: entry.file.path,
+				properties: this.extractEntryProperties(entry),
+				basesData: entry,
+			}));
 	}
 
 	/**
