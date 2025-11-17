@@ -407,8 +407,16 @@
     border-radius: var(--tn-radius-md);
     background: var(--background-secondary);
     overflow: hidden;
-    height: 1100px; /* Fixed height for ~20 task cards */
+    height: 550px; /* Fixed height for ~10 task cards */
     flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+/* Drag over state for quadrants */
+.eisenhower-matrix__quadrant--dragover {
+    border-color: var(--text-accent, #0366d6);
+    background: var(--background-modifier-hover);
+    box-shadow: 0 0 0 2px var(--text-accent, #0366d6);
 }
 
 /* Quadrant header */
@@ -432,13 +440,27 @@
 
 /* Tasks container within quadrant - fixed height with scroll */
 .eisenhower-matrix__quadrant-tasks {
-    height: 1050px; /* Fixed height: 1100px quadrant - ~50px header */
+    height: 500px; /* Fixed height: 550px quadrant - ~50px header */
     overflow-y: auto;
     padding: var(--tn-spacing-sm);
     display: flex;
     flex-direction: column;
     gap: var(--tn-spacing-xs);
     flex-shrink: 0;
+}
+
+/* Card wrapper for drag/drop */
+.eisenhower-matrix__card-wrapper {
+    cursor: grab;
+    transition: opacity 0.2s ease;
+}
+
+.eisenhower-matrix__card-wrapper:active {
+    cursor: grabbing;
+}
+
+.eisenhower-matrix__card-wrapper.eisenhower-matrix__card--dragging {
+    opacity: 0.5;
 }
 
 /* Empty state within quadrant */

@@ -5,6 +5,7 @@ import { TaskInfo } from "../types";
 import { identifyTaskNotesFromBasesData } from "./helpers";
 import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
+import { TFile } from "obsidian";
 
 type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important";
 
@@ -19,11 +20,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
 	/**
-	 * Fixed height for quadrants (approximately 20 task cards).
+	 * Fixed height for quadrants (approximately 10 task cards).
 	 * Each task card is ~45px + 8px gap = ~53px per card.
-	 * 20 cards × 53px = ~1060px, plus padding = ~1100px
+	 * 10 cards × 53px = ~530px, plus padding = ~550px
 	 */
-	private readonly QUADRANT_FIXED_HEIGHT = 1100; // pixels
+	private readonly QUADRANT_FIXED_HEIGHT = 550; // pixels
+	private draggedTaskPath: string | null = null;
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -214,19 +216,34 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		} else if (tasks.length >= this.VIRTUAL_SCROLL_THRESHOLD) {
 			// Use virtual scrolling for large quadrants
 			this.createVirtualQuadrant(tasksContainer, quadrantId, tasks, visibleProperties, cardOptions);
+			// Setup drop handlers for the quadrant (virtual scrolling doesn't prevent drops)
+			this.setupQuadrantDropHandlers(quadrant, quadrantId);
 		} else {
 			// Render normally for smaller quadrants
 			for (const task of tasks) {
 				try {
+					// Wrap card in draggable container
+					const cardWrapper = document.createElement("div");
+					cardWrapper.className = "eisenhower-matrix__card-wrapper";
+					cardWrapper.setAttribute("draggable", "true");
+					cardWrapper.setAttribute("data-task-path", task.path);
+					
 					const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
-					tasksContainer.appendChild(card);
+					cardWrapper.appendChild(card);
+					tasksContainer.appendChild(cardWrapper);
 					this.taskInfoCache.set(task.path, task);
+					
+					// Setup drag handlers
+					this.setupCardDragHandlers(cardWrapper, task);
 				} catch (error) {
 					console.error(`[TaskNotes][EisenhowerMatrixView] Error creating card for ${task.path}:`, error);
 					// Continue with next task instead of crashing
 				}
 			}
 		}
+		
+		// Setup drop handlers for the quadrant
+		this.setupQuadrantDropHandlers(quadrant, quadrantId);
 
 		quadrant.appendChild(tasksContainer);
 		this.matrixContainer.appendChild(quadrant);
@@ -302,9 +319,20 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			overscan: 3,
 			renderItem: (task: TaskInfo) => {
 				try {
+					// Wrap card in draggable container for virtual scrolling
+					const cardWrapper = document.createElement("div");
+					cardWrapper.className = "eisenhower-matrix__card-wrapper";
+					cardWrapper.setAttribute("draggable", "true");
+					cardWrapper.setAttribute("data-task-path", task.path);
+					
 					const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
+					cardWrapper.appendChild(card);
 					this.taskInfoCache.set(task.path, task);
-					return card;
+					
+					// Setup drag handlers
+					this.setupCardDragHandlers(cardWrapper, task);
+					
+					return cardWrapper;
 				} catch (error) {
 					console.error(`[TaskNotes][EisenhowerMatrixView] Error creating card for ${task.path}:`, error);
 					// Return empty div as fallback
@@ -326,6 +354,130 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		return {
 			targetDate,
 		};
+	}
+
+	private setupCardDragHandlers(cardWrapper: HTMLElement, task: TaskInfo): void {
+		cardWrapper.addEventListener("dragstart", (e: DragEvent) => {
+			this.draggedTaskPath = task.path;
+			cardWrapper.classList.add("eisenhower-matrix__card--dragging");
+
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = "move";
+				e.dataTransfer.setData("text/plain", task.path);
+			}
+		});
+
+		cardWrapper.addEventListener("dragend", () => {
+			cardWrapper.classList.remove("eisenhower-matrix__card--dragging");
+
+			// Clean up any lingering dragover classes
+			this.matrixContainer?.querySelectorAll('.eisenhower-matrix__quadrant--dragover').forEach(el => {
+				el.classList.remove('eisenhower-matrix__quadrant--dragover');
+			});
+			
+			this.draggedTaskPath = null;
+		});
+	}
+
+	private setupQuadrantDropHandlers(quadrant: HTMLElement, quadrantId: Quadrant): void {
+		// Drag over handler
+		quadrant.addEventListener("dragover", (e: DragEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+			quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
+		});
+
+		// Drag leave handler
+		quadrant.addEventListener("dragleave", (e: DragEvent) => {
+			// Only remove if we're actually leaving the quadrant (not just moving to a child)
+			const rect = quadrant.getBoundingClientRect();
+			const x = (e as any).clientX;
+			const y = (e as any).clientY;
+
+			if (
+				x < rect.left || x >= rect.right ||
+				y < rect.top || y >= rect.bottom
+			) {
+				quadrant.classList.remove("eisenhower-matrix__quadrant--dragover");
+			}
+		});
+
+		// Drop handler
+		quadrant.addEventListener("drop", async (e: DragEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			quadrant.classList.remove("eisenhower-matrix__quadrant--dragover");
+
+			if (!this.draggedTaskPath) return;
+
+			// Update tags based on target quadrant
+			await this.handleTaskDrop(this.draggedTaskPath, quadrantId);
+
+			this.draggedTaskPath = null;
+		});
+	}
+
+	private async handleTaskDrop(taskPath: string, targetQuadrant: Quadrant): Promise<void> {
+		try {
+			const task = this.taskInfoCache.get(taskPath);
+			if (!task) {
+				// Try to load the task if not in cache
+				const file = this.app.vault.getAbstractFileByPath(taskPath);
+				if (!(file instanceof TFile)) return;
+				
+				const loadedTask = await this.plugin.cacheManager.getTaskInfo(taskPath);
+				if (!loadedTask) return;
+				
+				await this.updateTaskTagsForQuadrant(loadedTask, targetQuadrant);
+			} else {
+				await this.updateTaskTagsForQuadrant(task, targetQuadrant);
+			}
+
+			// Refresh to show updated position
+			this.debouncedRefresh();
+		} catch (error) {
+			console.error("[TaskNotes][EisenhowerMatrixView] Error updating task:", error);
+		}
+	}
+
+	private async updateTaskTagsForQuadrant(task: TaskInfo, targetQuadrant: Quadrant): Promise<void> {
+		// Determine which tags should be present based on target quadrant
+		const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";
+		const shouldHaveImportant = targetQuadrant === "urgent-important" || targetQuadrant === "not-urgent-important";
+
+		// Get current tags (normalize to include # if missing)
+		const currentTags = (task.tags || []).map(t => t.startsWith("#") ? t : `#${t}`);
+		
+		// Normalize tag names for comparison
+		const normalizedUrgent = "#urgent";
+		const normalizedImportant = "#important";
+
+		// Check current state
+		const hasUrgent = currentTags.some(t => t.toLowerCase() === normalizedUrgent.toLowerCase());
+		const hasImportant = currentTags.some(t => t.toLowerCase() === normalizedImportant.toLowerCase());
+
+		// Build new tags array
+		const newTags: string[] = [];
+		
+		// Keep all existing tags except #urgent and #important
+		for (const tag of currentTags) {
+			const normalized = tag.toLowerCase();
+			if (normalized !== normalizedUrgent.toLowerCase() && normalized !== normalizedImportant.toLowerCase()) {
+				newTags.push(tag);
+			}
+		}
+
+		// Add tags based on target quadrant
+		if (shouldHaveUrgent && !hasUrgent) {
+			newTags.push(normalizedUrgent);
+		}
+		if (shouldHaveImportant && !hasImportant) {
+			newTags.push(normalizedImportant);
+		}
+
+		// Update the task tags
+		await this.plugin.updateTaskProperty(task, "tags", newTags.length > 0 ? newTags : undefined);
 	}
 
 	private destroyQuadrantScrollers(): void {
