@@ -828,7 +828,10 @@
     background-color: var(--priority-high-color, var(--tn-color-error));
 }
 
-.tasknotes-plugin .task-card--priority-medium > .task-card__main-row .task-card__priority-dot,
+.tasknotes-plugin .task-card--priority-medium > .task-card__main-row .task-card__priority-dot {
+    background-color: var(--priority-medium-color, var(--tn-interactive-accent));
+}
+
 .tasknotes-plugin .task-card--priority-normal > .task-card__main-row .task-card__priority-dot {
     background-color: var(--priority-normal-color, var(--tn-interactive-accent));
 }
@@ -1171,7 +1174,7 @@
 .tasknotes-plugin .task-card--layout-inline .task-card__title {
     font-size: inherit; /* Use editor's font size */
     font-weight: 400;
-    max-width: 300px;
+    max-width: min(600px, 80vw); /* Responsive max-width for longer titles */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

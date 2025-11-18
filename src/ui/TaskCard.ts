@@ -29,6 +29,11 @@ import {
 	type LinkServices,
 } from "./renderers/linkRenderer";
 import { renderTagsValue, renderContextsValue, type TagServices } from "./renderers/tagRenderer";
+import {
+	convertInternalToUserProperties,
+	isPropertyForField,
+} from "../utils/propertyMapping";
+import { DEFAULT_INTERNAL_VISIBLE_PROPERTIES } from "../settings/defaults";
 
 export interface TaskCardOptions {
 	targetDate?: Date;
@@ -76,24 +81,29 @@ function attachDateClickHandler(
 				}
 			},
 			plugin,
+			app: plugin.app,
 		});
 		menu.show(e as MouseEvent);
 	});
 }
 
 /**
- * Get default visible properties when no custom configuration is provided
+ * Get default visible properties when no custom configuration is provided.
+ * Returns user-configured property names (e.g., "task-status" if user customized the status field).
+ *
+ * @param plugin - The plugin instance with fieldMapper
+ * @returns Array of user-configured property names
  */
-function getDefaultVisibleProperties(): string[] {
-	return [
-		"due", // Due date
-		"scheduled", // Scheduled date
-		"projects", // Projects
-		"contexts", // Contexts
-		"tags", // Tags
-		"blocked", // Blocked indicator
-		"blocking", // Blocking indicator
+function getDefaultVisibleProperties(plugin: TaskNotesPlugin): string[] {
+	// Combine FieldMapping properties with special properties
+	const internalDefaults = [
+		...DEFAULT_INTERNAL_VISIBLE_PROPERTIES,
+		"tags", // Special property (not in FieldMapping)
+		"blocked", // Special property (computed from blockedBy)
+		"blocking", // Special property (not in FieldMapping)
 	];
+
+	return convertInternalToUserProperties(internalDefaults, plugin);
 }
 
 /**
@@ -116,31 +126,32 @@ const PROPERTY_EXTRACTORS: Record<string, (task: TaskInfo) => any> = {
 	completedDate: (task) => task.completedDate,
 	reminders: (task) => task.reminders,
 	icsEventId: (task) => task.icsEventId,
-	complete_instances: (task) => task.complete_instances,
-	skipped_instances: (task) => task.skipped_instances,
-	"file.ctime": (task) => task.dateCreated,
-	"file.mtime": (task) => task.dateModified,
+	completeInstances: (task) => task.complete_instances,
+	skippedInstances: (task) => task.skipped_instances,
+	dateCreated: (task) => task.dateCreated,
+	dateModified: (task) => task.dateModified,
 };
 
 /**
  * Get property value from a task with improved error handling and type safety.
  *
- * IMPORTANT: The propertyId parameter should be the frontmatter property name
- * (e.g., "complete_instances", "due") or a computed property name (e.g., "totalTrackedTime"),
- * NOT a FieldMapping key (e.g., "completeInstances").
- *
- * Property extractors are keyed by frontmatter property names to ensure consistency
- * with how properties are stored and accessed throughout the system.
- *
  * @param task - The task to extract the property from
- * @param propertyId - The property identifier (frontmatter name or computed property)
+ * @param propertyId - The property identifier (user-configured or internal name)
  * @param plugin - TaskNotes plugin instance
  * @returns The property value, or undefined if not found
  */
 function getPropertyValue(task: TaskInfo, propertyId: string, plugin: TaskNotesPlugin): unknown {
 	try {
-		// Use extractors for standard properties
-		// Property extractors are keyed by frontmatter property names (e.g., "complete_instances")
+		// Check if this is a user-configured name for a mapped field
+		const mappingKey = plugin.fieldMapper.lookupMappingKey(propertyId);
+		if (mappingKey) {
+			// Use the mapping key as the extractor key (e.g., "due", "scheduled")
+			if (mappingKey in PROPERTY_EXTRACTORS) {
+				return PROPERTY_EXTRACTORS[mappingKey](task);
+			}
+		}
+
+		// Try direct property lookup (for non-mapped properties)
 		if (propertyId in PROPERTY_EXTRACTORS) {
 			return PROPERTY_EXTRACTORS[propertyId](task);
 		}
@@ -380,7 +391,7 @@ const PROPERTY_RENDERERS: Record<string, PropertyRenderer> = {
 			element.textContent = `Recurring: ${getRecurrenceDisplayText(value)}`;
 		}
 	},
-	complete_instances: (element, value, task) => {
+	completeInstances: (element, value, task) => {
 		if (Array.isArray(value) && value.length > 0) {
 			const count = value.length;
 			const skippedCount = task.skipped_instances?.length || 0;
@@ -396,7 +407,7 @@ const PROPERTY_RENDERERS: Record<string, PropertyRenderer> = {
 			}
 		}
 	},
-	skipped_instances: (element, value, task) => {
+	skippedInstances: (element, value, task) => {
 		if (Array.isArray(value) && value.length > 0) {
 			const count = value.length;
 			element.textContent = `⊘ ${count} skipped`;
@@ -412,7 +423,7 @@ const PROPERTY_RENDERERS: Record<string, PropertyRenderer> = {
 			})}`;
 		}
 	},
-	"file.ctime": (element, value, task, plugin) => {
+	dateCreated: (element, value, task, plugin) => {
 		if (typeof value === "string") {
 			element.textContent = `Created: ${formatDateTimeForDisplay(value, {
 				dateFormat: "MMM d",
@@ -421,7 +432,7 @@ const PROPERTY_RENDERERS: Record<string, PropertyRenderer> = {
 			})}`;
 		}
 	},
-	"file.mtime": (element, value, task, plugin) => {
+	dateModified: (element, value, task, plugin) => {
 		if (typeof value === "string") {
 			element.textContent = `Modified: ${formatDateTimeForDisplay(value, {
 				dateFormat: "MMM d",
@@ -533,8 +544,14 @@ function renderPropertyMetadata(
 	});
 
 	try {
-		if (propertyId in PROPERTY_RENDERERS) {
-			PROPERTY_RENDERERS[propertyId](element, value, task, plugin);
+		// Check if this is a user-configured name for a mapped field
+		const mappingKey = plugin.fieldMapper.lookupMappingKey(propertyId);
+
+		// Try using the mapping key as the renderer key
+		const rendererKey = mappingKey || propertyId;
+
+		if (rendererKey in PROPERTY_RENDERERS) {
+			PROPERTY_RENDERERS[rendererKey](element, value, task, plugin);
 		} else if (propertyId.startsWith("user:")) {
 			renderUserProperty(element, propertyId, value, plugin);
 		} else {
@@ -927,6 +944,27 @@ function addMetadataSeparators(metadataLine: HTMLElement, metadataElements: HTML
 
 /**
  * Create a minimalist, unified task card element
+ *
+ * @param task - The task to render
+ * @param plugin - TaskNotes plugin instance
+ * @param visibleProperties - IMPORTANT: Must be user-configured frontmatter property names
+ *                            (e.g., "task-status", "complete_instances"), NOT internal FieldMapping keys.
+ *                            If passing from settings.defaultVisibleProperties, convert using
+ *                            convertInternalToUserProperties() first.
+ * @param options - Optional rendering options (layout, targetDate, etc.)
+ *
+ * @example
+ * // Correct: Convert internal names before passing
+ * const props = plugin.settings.defaultVisibleProperties
+ *   ? convertInternalToUserProperties(plugin.settings.defaultVisibleProperties, plugin)
+ *   : undefined;
+ * createTaskCard(task, plugin, props);
+ *
+ * // Correct: Pass frontmatter names from Bases
+ * createTaskCard(task, plugin, ["complete_instances", "task-status"]);
+ *
+ * // WRONG: Don't pass internal keys directly
+ * createTaskCard(task, plugin, ["completeInstances", "status"]); // ❌
  */
 export function createTaskCard(
 	task: TaskInfo,
@@ -1020,7 +1058,9 @@ export function createTaskCard(
 
 	// Status indicator dot (conditional based on visible properties)
 	let statusDot: HTMLElement | null = null;
-	const shouldShowStatus = !visibleProperties || visibleProperties.includes("status");
+	const shouldShowStatus =
+		!visibleProperties ||
+		visibleProperties.some((prop) => isPropertyForField(prop, "status", plugin));
 	if (shouldShowStatus) {
 		statusDot = mainRow.createEl("span", { cls: "task-card__status-dot" });
 		if (statusConfig) {
@@ -1095,7 +1135,9 @@ export function createTaskCard(
 	}
 
 	// Priority indicator dot (conditional based on visible properties)
-	const shouldShowPriority = !visibleProperties || visibleProperties.includes("priority");
+	const shouldShowPriority =
+		!visibleProperties ||
+		visibleProperties.some((prop) => isPropertyForField(prop, "priority", plugin));
 	if (task.priority && priorityConfig && shouldShowPriority) {
 		const priorityDot = mainRow.createEl("span", {
 			cls: "task-card__priority-dot",
@@ -1381,12 +1423,19 @@ export function createTaskCard(
 	// Get properties to display
 	const propertiesToShow =
 		visibleProperties ||
-		plugin.settings.defaultVisibleProperties ||
-		getDefaultVisibleProperties();
+		(plugin.settings.defaultVisibleProperties
+			? convertInternalToUserProperties(plugin.settings.defaultVisibleProperties, plugin)
+			: getDefaultVisibleProperties(plugin));
 
 	// Render each visible property
 	for (const propertyId of propertiesToShow) {
-		if (propertyId === "status" || propertyId === "priority") continue;
+		// Skip status and priority as they're rendered separately
+		if (
+			isPropertyForField(propertyId, "status", plugin) ||
+			isPropertyForField(propertyId, "priority", plugin)
+		) {
+			continue;
+		}
 
 		if (propertyId === "blocked") {
 			if (task.isBlocked) {
@@ -1619,7 +1668,9 @@ export function updateTaskCard(
 	}
 
 	// Update status dot (conditional based on visible properties)
-	const shouldShowStatus = !visibleProperties || visibleProperties.includes("status");
+	const shouldShowStatus =
+		!visibleProperties ||
+		visibleProperties.some((prop) => isPropertyForField(prop, "status", plugin));
 	const statusDot = element.querySelector(".task-card__status-dot") as HTMLElement;
 
 	if (shouldShowStatus) {
@@ -1724,7 +1775,9 @@ export function updateTaskCard(
 	}
 
 	// Update priority indicator (conditional based on visible properties)
-	const shouldShowPriority = !visibleProperties || visibleProperties.includes("priority");
+	const shouldShowPriority =
+		!visibleProperties ||
+		visibleProperties.some((prop) => isPropertyForField(prop, "priority", plugin));
 	const existingPriorityDot = element.querySelector(".task-card__priority-dot") as HTMLElement;
 
 	if (shouldShowPriority && task.priority && priorityConfig) {
@@ -2065,11 +2118,18 @@ export function updateTaskCard(
 		// Get properties to display
 		const propertiesToShow =
 			visibleProperties ||
-			plugin.settings.defaultVisibleProperties ||
-			getDefaultVisibleProperties();
+			(plugin.settings.defaultVisibleProperties
+				? convertInternalToUserProperties(plugin.settings.defaultVisibleProperties, plugin)
+				: getDefaultVisibleProperties(plugin));
 
 		for (const propertyId of propertiesToShow) {
-			if (propertyId === "status" || propertyId === "priority") continue;
+			// Skip status and priority as they're rendered separately
+			if (
+				isPropertyForField(propertyId, "status", plugin) ||
+				isPropertyForField(propertyId, "priority", plugin)
+			) {
+				continue;
+			}
 
 			if (propertyId === "blocked") {
 				if (task.isBlocked) {

@@ -105,7 +105,7 @@ export const de: TranslationTree = {
 			title: "Mini-Kalender",
 		},
 		advancedCalendar: {
-			title: "Erweiterter Kalender",
+			title: "Kalender",
 			filters: {
 				showFilters: "Filter anzeigen",
 				hideFilters: "Filter ausblenden",
@@ -834,10 +834,12 @@ export const de: TranslationTree = {
 			},
 			taskPriorities: {
 				header: "Aufgabenprioritäten",
-				description: "Passe die verfügbaren Prioritätsstufen für deine Aufgaben an. Prioritätsgewichte bestimmen Sortierreihenfolge und visuelle Hierarchie in deinen Aufgabenansichten.",
+				description:
+					"Passe die verfügbaren Prioritätsstufen für deine Aufgaben an. Ab v4.0+ werden Prioritäten in Bases-Ansichten alphabetisch nach ihrem Wert sortiert.",
 				howTheyWork: {
 					title: "Wie Prioritäten funktionieren:",
-					value: "Wert: Der interne Bezeichner, der in deinen Aufgabendateien gespeichert wird (z.B. \"hoch\")",
+					value:
+						'Wert: Der interne Bezeichner, der in deinen Aufgabendateien gespeichert wird. Verwende Präfixe wie "1-dringend", "2-hoch", um die Sortierreihenfolge in Bases-Ansichten zu steuern.',
 					label: "Anzeigelabel: Der Anzeigename in der Benutzeroberfläche (z.B. \"Hohe Priorität\")",
 					color: "Farbe: Visuelle Indikatorfarbe für Prioritätspunkt und Abzeichen",
 					weight: "Gewicht: Numerischer Wert für Sortierung (höhere Gewichte erscheinen zuerst in Listen)",
@@ -848,7 +850,8 @@ export const de: TranslationTree = {
 					description: "Erstelle eine neue Prioritätsstufe für deine Aufgaben",
 					buttonText: "Priorität hinzufügen",
 				},
-				validationNote: "Hinweis: Du musst mindestens 1 Priorität haben. Höhere Gewichte haben Vorrang bei Sortierung und visueller Hierarchie.",
+				validationNote:
+					"Hinweis: Du musst mindestens 1 Priorität haben. Prioritäten werden alphabetisch nach Wert in Bases-Ansichten sortiert.",
 				emptyState: "Keine benutzerdefinierten Prioritäten konfiguriert. Füge eine Priorität hinzu, um zu beginnen.",
 				emptyStateButton: "Priorität hinzufügen",
 				fields: {
@@ -1061,7 +1064,7 @@ export const de: TranslationTree = {
 			},
 			defaultEventVisibility: {
 				header: "Standard-Event-Sichtbarkeit",
-				description: "Konfiguriere, welche Event-Typen standardmäßig beim Öffnen des erweiterten Kalenders sichtbar sind. Benutzer können diese trotzdem in der Kalenderansicht ein-/ausschalten.",
+				description: "Konfiguriere, welche Event-Typen standardmäßig beim Öffnen des Kalenders sichtbar sind. Benutzer können diese trotzdem in der Kalenderansicht ein-/ausschalten.",
 				showScheduledTasks: {
 					name: "Geplante Aufgaben anzeigen",
 					description: "Aufgaben mit geplanten Daten standardmäßig anzeigen",
@@ -1263,6 +1266,36 @@ export const de: TranslationTree = {
 				enable: {
 					name: "Bases-Integration aktivieren",
 					description: "TaskNotes-Ansichten zur Verwendung im Obsidian Bases Plugin aktivieren. Bases Plugin muss aktiviert sein, damit dies funktioniert.",
+				},
+				viewCommands: {
+					header: "Ansichtsbefehle",
+					description: "Konfiguriere, welche .base-Dateien von Ansichtsbefehlen geöffnet werden. Diese Befehle ermöglichen es dir, vertraute Verknüpfungen zu verwenden, während du mit Bases-Dateien arbeitest.",
+					commands: {
+						miniCalendar: "Mini-Kalenderansicht öffnen",
+						kanban: "Kanban-Ansicht öffnen",
+						tasks: "Aufgabenansicht öffnen",
+						advancedCalendar: "Erweiterte Kalenderansicht öffnen",
+						agenda: "Agenda-Ansicht öffnen",
+						relationships: "Beziehungs-Widget",
+					},
+					fileLabel: "Datei: {path}",
+					resetButton: "Zurücksetzen",
+					resetTooltip: "Auf Standardpfad zurücksetzen",
+				},
+				createDefaultFiles: {
+					name: "Standarddateien erstellen",
+					description: "Erstelle die Standard-.base-Dateien im TaskNotes/Views/-Verzeichnis. Vorhandene Dateien werden nicht überschrieben.",
+					buttonText: "Dateien erstellen",
+				},
+				exportV3Views: {
+					name: "V3-gespeicherte Ansichten nach Bases exportieren",
+					description: "Konvertiere alle deine gespeicherten Ansichten aus TaskNotes v3 in eine einzige .base-Datei mit mehreren Ansichten. Dies hilft bei der Migration deiner v3-Filterkonfigurationen zum neuen Bases-System.",
+					buttonText: "V3-Ansichten exportieren",
+					noViews: "Keine gespeicherten Ansichten zum Exportieren",
+					fileExists: "Datei existiert bereits",
+					confirmOverwrite: 'Eine Datei namens "{fileName}" existiert bereits. Überschreiben?',
+					success: "{count} gespeicherte Ansichten nach {filePath} exportiert",
+					error: "Fehler beim Exportieren von Ansichten: {message}",
 				},
 				notices: {
 					enabled: "Bases-Integration aktiviert. Bitte starte Obsidian neu, um die Einrichtung abzuschließen.",
@@ -1660,7 +1693,7 @@ export const de: TranslationTree = {
 	},
 	commands: {
 		openCalendarView: "Mini-Kalenderansicht öffnen",
-		openAdvancedCalendarView: "Erweiterte Kalenderansicht öffnen",
+		openAdvancedCalendarView: "Kalenderansicht öffnen",
 		openTasksView: "Aufgabenansicht öffnen",
 		openNotesView: "Notizenansicht öffnen",
 		openAgendaView: "Agenda-Ansicht öffnen",

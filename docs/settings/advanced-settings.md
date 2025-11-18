@@ -44,7 +44,7 @@ These settings provide customization options, such as field mapping, custom stat
 
 ### Smart List Filtering
 
-User fields of type **List** support intelligent comma splitting that preserves:
+User fields of type **List** support comma splitting that preserves:
 - **Wikilinks**: `[[Health, Fitness & Mindset]], [[Nutrition]]` correctly splits into two items
 - **Quoted text**: `"Focus, Deep Work", Notes` treats quoted content as single items
 - **Mixed content**: Handles combinations of wikilinks, quotes, and plain text
@@ -64,11 +64,7 @@ This allows filtering like "Priority greater than 1" to match "2-Medium" and "3-
 
 ### Instant Availability
 
-User fields become available in filter, sorting, and grouping menus immediately after configuration—no plugin reload required. The fields appear in all TaskNotes views (Task List, Agenda, Kanban, Advanced Calendar) as soon as you save the settings.
-
-### Technical Implementation
-
-For developers interested in the technical details of User Fields implementation, see [User Fields Technical Documentation](../development/USER_FIELDS_TECHNICAL.md).
+User fields become available in the Bases filter/sort/group controls immediately after configuration—no plugin reload required. The fields appear in all TaskNotes views (Task List, Agenda, Kanban, Calendar View) as soon as you save the settings.
 
 ## Custom Status System
 
@@ -76,7 +72,9 @@ TaskNotes allows you to define your own **Custom Status Workflows**. You can cre
 
 ## Custom Priority System
 
-You can also create a **Custom Priority System**. You can define as many priority levels as you need, and you can customize their names, colors, and weights. The weight of a priority determines its importance, and is used for sorting and filtering.
+You can also create a **Custom Priority System**. You can define as many priority levels as you need, and you can customize their names, colors, and weights.
+
+> **Note:** In TaskNotes v4.0+, Obsidian's Bases plugin handles priority sorting alphabetically by the priority value. To ensure priorities sort in your desired order, name them to sort alphabetically (e.g., `1-urgent`, `2-high`, `3-medium`, `4-normal`, `5-low`). The weight field is preserved for potential future use but does not affect Bases sorting.
 
 ## Pomodoro Timer Settings
 

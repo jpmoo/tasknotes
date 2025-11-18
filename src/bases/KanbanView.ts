@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import { TFile } from "obsidian";
 import TaskNotesPlugin from "../main";
 import { BasesViewBase } from "./BasesViewBase";
 import { TaskInfo } from "../types";
@@ -21,17 +22,18 @@ export class KanbanView extends BasesViewBase {
 	// View options (accessed via BasesViewConfig)
 	private swimLanePropertyId: string | null = null;
 	private columnWidth = 280;
+	private maxSwimlaneHeight = 600;
 	private hideEmptyColumns = false;
 	private columnOrders: Record<string, string[]> = {};
 	private configLoaded = false; // Track if we've successfully loaded config
 	/**
 	 * Threshold for enabling virtual scrolling in kanban columns/swimlane cells.
-	 * Virtual scrolling activates when a column or cell has >= 30 cards.
+	 * Virtual scrolling activates when a column or cell has >= 15 cards.
 	 * Lower than TaskListView (100) because kanban cards are typically larger with more
 	 * visible properties, and columns are narrower (more constrained viewport).
 	 * Benefits: ~85% memory reduction, smooth 60fps scrolling for columns with 200+ cards.
 	 */
-	private readonly VIRTUAL_SCROLL_THRESHOLD = 30;
+	private readonly VIRTUAL_SCROLL_THRESHOLD = 15;
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -65,6 +67,7 @@ export class KanbanView extends BasesViewBase {
 		try {
 			this.swimLanePropertyId = this.config.getAsPropertyId('swimLane');
 			this.columnWidth = (this.config.get('columnWidth') as number) || 280;
+			this.maxSwimlaneHeight = (this.config.get('maxSwimlaneHeight') as number) || 600;
 			this.hideEmptyColumns = (this.config.get('hideEmptyColumns') as boolean) || false;
 
 			// Read column orders
@@ -187,6 +190,9 @@ export class KanbanView extends BasesViewBase {
 		// Augment with empty status columns if grouping by status
 		this.augmentWithEmptyStatusColumns(groups, groupByPropertyId);
 
+		// Augment with empty priority columns if grouping by priority
+		this.augmentWithEmptyPriorityColumns(groups, groupByPropertyId);
+
 		return groups;
 	}
 
@@ -199,9 +205,14 @@ export class KanbanView extends BasesViewBase {
 		groupByPropertyId: string
 	): void {
 		// Check if we're grouping by status
-		// The internal field name is "status", which maps to "task.status" in Bases
-		const internalFieldName = this.propertyMapper.basesToInternal(groupByPropertyId);
-		if (internalFieldName !== 'status') {
+		// Compare the groupBy property against the user's configured status field name
+		const statusPropertyName = this.plugin.fieldMapper.toUserField('status');
+
+		// The groupByPropertyId from Bases might have a prefix (e.g., "note.status")
+		// Strip the prefix to compare against the field name
+		const cleanGroupBy = groupByPropertyId.replace(/^(note\.|file\.|task\.)/, '');
+
+		if (cleanGroupBy !== statusPropertyName) {
 			return; // Not grouping by status, don't augment
 		}
 
@@ -219,6 +230,44 @@ export class KanbanView extends BasesViewBase {
 			if (!groups.has(statusValue)) {
 				// This status has no tasks - add an empty group
 				groups.set(statusValue, []);
+			}
+		}
+	}
+
+	/**
+	 * Augment groups with empty columns for user-defined priorities.
+	 * Only applies when grouping by priority property.
+	 */
+	private augmentWithEmptyPriorityColumns(
+		groups: Map<string, TaskInfo[]>,
+		groupByPropertyId: string
+	): void {
+		// Check if we're grouping by priority
+		// Compare the groupBy property against the user's configured priority field name
+		const priorityPropertyName = this.plugin.fieldMapper.toUserField('priority');
+
+		// The groupByPropertyId from Bases might have a prefix (e.g., "note.priority" or "task.priority")
+		// Strip the prefix to compare against the field name
+		const cleanGroupBy = groupByPropertyId.replace(/^(note\.|file\.|task\.)/, '');
+
+		if (cleanGroupBy !== priorityPropertyName) {
+			return; // Not grouping by priority, don't augment
+		}
+
+		// Get all user-defined priorities from the priority manager
+		const customPriorities = this.plugin.priorityManager.getAllPriorities();
+		if (!customPriorities || customPriorities.length === 0) {
+			return; // No custom priorities defined
+		}
+
+		// Add empty groups for any priority values not already present
+		for (const priorityConfig of customPriorities) {
+			// Use the priority value (what gets written to YAML) as the group key
+			const priorityValue = priorityConfig.value;
+
+			if (!groups.has(priorityValue)) {
+				// This priority has no tasks - add an empty group
+				groups.set(priorityValue, []);
 			}
 		}
 	}
@@ -326,8 +375,9 @@ export class KanbanView extends BasesViewBase {
 	): Promise<void> {
 		if (!this.boardEl) return;
 
-		// Set CSS variable for column width
+		// Set CSS variables for column width and swimlane max height
 		this.boardEl.style.setProperty('--kanban-column-width', `${this.columnWidth}px`);
+		this.boardEl.style.setProperty('--kanban-swimlane-max-height', `${this.maxSwimlaneHeight}px`);
 
 		// Add swimlanes class to board
 		this.boardEl.addClass("kanban-view__board--swimlanes");
@@ -395,11 +445,6 @@ export class KanbanView extends BasesViewBase {
 						"data-swimlane": swimLaneKey
 					}
 				});
-
-				// Set max height on cell to prevent expansion while allowing flexibility
-				if (tasks.length >= this.VIRTUAL_SCROLL_THRESHOLD) {
-					cell.style.maxHeight = "2000px";
-				}
 
 				// Setup drop handlers for this cell
 				this.setupSwimLaneCellDragDrop(cell, columnKey, swimLaneKey);
@@ -794,24 +839,12 @@ export class KanbanView extends BasesViewBase {
 			const groupByPropertyId = this.getGroupByPropertyId();
 			if (!groupByPropertyId) return;
 
-			// Map Bases property ID to internal field name
-			const internalFieldName = this.propertyMapper.basesToInternal(groupByPropertyId);
-
 			// Update the groupBy property
-			await this.plugin.updateTaskProperty(
-				{ path: taskPath } as TaskInfo,
-				internalFieldName as any,
-				newGroupValue
-			);
+			await this.updateTaskFrontmatterProperty(taskPath, groupByPropertyId, newGroupValue);
 
 			// Update swimlane property if applicable
 			if (newSwimLaneValue !== null && this.swimLanePropertyId) {
-				const swimLaneInternalField = this.propertyMapper.basesToInternal(this.swimLanePropertyId);
-				await this.plugin.updateTaskProperty(
-					{ path: taskPath } as TaskInfo,
-					swimLaneInternalField as any,
-					newSwimLaneValue
-				);
+				await this.updateTaskFrontmatterProperty(taskPath, this.swimLanePropertyId, newSwimLaneValue);
 			}
 
 			// Refresh to show updated position
@@ -819,6 +852,28 @@ export class KanbanView extends BasesViewBase {
 		} catch (error) {
 			console.error("[TaskNotes][KanbanView] Error updating task:", error);
 		}
+	}
+
+	/**
+	 * Update a frontmatter property for any property (built-in or user-defined)
+	 */
+	private async updateTaskFrontmatterProperty(
+		taskPath: string,
+		basesPropertyId: string,
+		value: any
+	): Promise<void> {
+		const file = this.plugin.app.vault.getAbstractFileByPath(taskPath);
+		if (!file || !(file instanceof TFile)) {
+			throw new Error(`Cannot find task file: ${taskPath}`);
+		}
+
+		// Strip Bases prefix to get the frontmatter key
+		const frontmatterKey = basesPropertyId.replace(/^(note\.|file\.|task\.)/, '');
+
+		// Update the frontmatter directly
+		await this.plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			frontmatter[frontmatterKey] = value;
+		});
 	}
 
 	protected setupContainer(): void {
@@ -1157,6 +1212,7 @@ export class KanbanView extends BasesViewBase {
 				}
 			},
 			plugin: this.plugin,
+			app: this.app,
 		});
 		menu.show(event);
 	}

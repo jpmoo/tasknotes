@@ -1159,6 +1159,7 @@ export class TaskContextMenu {
 			},
 			onCustomDate: onCustomDate,
 			plugin: this.options.plugin,
+			app: this.options.plugin.app,
 		});
 
 		const dateOptions = dateContextMenu.getDateOptions();
@@ -1364,12 +1365,8 @@ export class TaskContextMenu {
 			// Sort by order property
 			const sortedStatuses = [...statusConfigs].sort((a, b) => a.order - b.order);
 
-			// Filter for recurring tasks if needed
-			const availableStatuses = task.recurrence
-				? sortedStatuses.filter((status) => status.value !== "completed")
-				: sortedStatuses;
-
-			availableStatuses.forEach((status) => {
+			// Show all statuses for all tasks (including recurring tasks)
+			sortedStatuses.forEach((status) => {
 				statusOptions.push({
 					label: status.label,
 					value: status.value,

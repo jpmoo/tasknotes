@@ -24,6 +24,18 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 				name: "TaskNotes Task List",
 				icon: "tasknotes-simple",
 				factory: buildTaskListViewFactory(plugin),
+				options: () => [
+					{
+						type: "property",
+						key: "subGroup",
+						displayName: "Sub-group by",
+						placeholder: "Select property for sub-grouping (optional)",
+						filter: (prop: string) => {
+							// Show all note and task properties that could be used for sub-grouping
+							return prop.startsWith("note.") || prop.startsWith("task.");
+						},
+					},
+				],
 			});
 
 			// Register Kanban view using public API
@@ -50,6 +62,15 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 						min: 200,
 						max: 500,
 						step: 20,
+					},
+					{
+						type: "slider",
+						key: "maxSwimlaneHeight",
+						displayName: "Max Swimlane Height",
+						default: 600,
+						min: 300,
+						max: 1200,
+						step: 50,
 					},
 					{
 						type: "toggle",

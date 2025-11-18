@@ -74,6 +74,28 @@
     display: none;
 }
 
+/* Sub-group header styling */
+.tn-tasknoteTaskList .task-group[data-level="sub"] {
+    padding-left: 16px; /* Subtle indentation */
+    margin-bottom: var(--tn-spacing-sm);
+}
+
+.tn-tasknoteTaskList .task-group[data-level="sub"] .task-group-header {
+    font-size: 0.95em;
+    font-weight: 500; /* Less bold than primary */
+    color: var(--tn-text-muted);
+    padding: var(--tn-spacing-xs) var(--tn-spacing-sm);
+}
+
+.tn-tasknoteTaskList .task-group[data-level="sub"] .task-group-toggle {
+    opacity: 0.8; /* Slightly more subtle chevron */
+}
+
+.tn-tasknoteTaskList .task-group[data-level="sub"] .task-group-toggle svg {
+    width: 14px;
+    height: 14px;
+}
+
 /* Task cards container */
 .tn-bases-tasknotes-list .tasks-container.task-cards {
     display: flex;
@@ -338,6 +360,7 @@
     background: var(--tn-bg-primary);
     padding: var(--tn-spacing-sm);
     min-height: 100px;
+    max-height: var(--kanban-swimlane-max-height, 600px);
     display: flex;
     flex-direction: column;
 }
@@ -348,6 +371,8 @@
     flex-direction: column;
     gap: var(--tn-spacing-xs);
     flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 /* Drag over state for swimlane cells */

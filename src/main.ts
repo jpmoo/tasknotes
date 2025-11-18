@@ -66,9 +66,11 @@ import { createTaskLinkOverlay, dispatchTaskUpdate } from "./editor/TaskLinkOver
 import { createReadingModeTaskLinkProcessor } from "./editor/ReadingModeTaskLinkProcessor";
 import {
 	createRelationshipsDecorations,
+	setupReadingModeHandlers as setupRelationshipsReadingMode,
 } from "./editor/RelationshipsDecorations";
 import {
 	createTaskCardNoteDecorations,
+	setupReadingModeHandlers as setupTaskCardReadingMode,
 } from "./editor/TaskCardNoteDecorations";
 import { DragDropManager } from "./utils/DragDropManager";
 import {
@@ -218,6 +220,8 @@ export default class TaskNotesPlugin extends Plugin {
 
 	// Event listener cleanup
 	private taskUpdateListenerForEditor: import("obsidian").EventRef | null = null;
+	private relationshipsReadingModeCleanup: (() => void) | null = null;
+	private taskCardReadingModeCleanup: (() => void) | null = null;
 
 	// Initialization guard to prevent duplicate initialization
 	private initializationComplete = false;
@@ -515,8 +519,14 @@ export default class TaskNotesPlugin extends Plugin {
 			// Register task card note decorations for live preview (before relationships to ensure proper ordering)
 			this.registerEditorExtension(createTaskCardNoteDecorations(this));
 
+			// Setup task card widget for reading mode
+			this.taskCardReadingModeCleanup = setupTaskCardReadingMode(this);
+
 			// Register relationships decorations for live preview
 			this.registerEditorExtension(createRelationshipsDecorations(this));
+
+			// Setup relationships widget for reading mode
+			this.relationshipsReadingModeCleanup = setupRelationshipsReadingMode(this);
 
 			// Register reading mode task link processor
 			this.registerMarkdownPostProcessor(createReadingModeTaskLinkProcessor(this));
@@ -1070,6 +1080,18 @@ export default class TaskNotesPlugin extends Plugin {
 			this.viewPerformanceService.destroy();
 		}
 
+		// Clean up task card reading mode handlers
+		if (this.taskCardReadingModeCleanup) {
+			this.taskCardReadingModeCleanup();
+			this.taskCardReadingModeCleanup = null;
+		}
+
+		// Clean up relationships reading mode handlers
+		if (this.relationshipsReadingModeCleanup) {
+			this.relationshipsReadingModeCleanup();
+			this.relationshipsReadingModeCleanup = null;
+		}
+
 		// Clean up AutoArchiveService
 		if (this.autoArchiveService) {
 			this.autoArchiveService.stop();
@@ -1477,7 +1499,20 @@ export default class TaskNotesPlugin extends Plugin {
 				id: "start-pomodoro",
 				nameKey: "commands.startPomodoro",
 				callback: async () => {
-					await this.pomodoroService.startPomodoro();
+					const state = this.pomodoroService.getState();
+					if (state.currentSession && !state.isRunning) {
+						await this.pomodoroService.resumePomodoro();
+					} else {
+						// No active session - start the type indicated by nextSessionType
+						if (state.nextSessionType === "short-break") {
+							await this.pomodoroService.startBreak(false);
+						} else if (state.nextSessionType === "long-break") {
+							await this.pomodoroService.startBreak(true);
+						} else {
+							// Default to work session
+							await this.pomodoroService.startPomodoro();
+						}
+					}
 				},
 			},
 			{
@@ -1782,6 +1817,20 @@ export default class TaskNotesPlugin extends Plugin {
 				}
 
 				const normalizedPath = normalizePath(rawPath);
+				// eslint-disable-next-line no-await-in-loop
+				if (await adapter.exists(normalizedPath)) {
+					skipped.push(rawPath);
+					continue;
+				}
+
+				// Generate template with user settings
+				const template = generateBasesFileTemplate(commandId, this);
+				if (!template) {
+					skipped.push(rawPath);
+					continue;
+				}
+
+				// Only create folder hierarchy if we're actually creating the file
 				const lastSlashIndex = normalizedPath.lastIndexOf("/");
 				const directory = lastSlashIndex >= 0 ? normalizedPath.substring(0, lastSlashIndex) : "";
 
@@ -1790,18 +1839,6 @@ export default class TaskNotesPlugin extends Plugin {
 					await this.ensureFolderHierarchy(directory);
 				}
 
-				// eslint-disable-next-line no-await-in-loop
-				if (await adapter.exists(normalizedPath)) {
-					skipped.push(rawPath);
-					continue;
-				}
-
-				// Generate template with user settings
-				const template = generateBasesFileTemplate(commandId, this.settings);
-				if (!template) {
-					skipped.push(rawPath);
-					continue;
-				}
 				// eslint-disable-next-line no-await-in-loop
 				await this.app.vault.create(normalizedPath, template);
 				created.push(rawPath);

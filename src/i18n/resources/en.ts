@@ -105,7 +105,7 @@ export const en: TranslationTree = {
 			title: "Mini Calendar",
 		},
 		advancedCalendar: {
-			title: "Advanced Calendar",
+			title: "Calendar",
 			filters: {
 				showFilters: "Show filters",
 				hideFilters: "Hide filters",
@@ -862,15 +862,13 @@ export const en: TranslationTree = {
 			taskPriorities: {
 				header: "Task Priorities",
 				description:
-					"Customize the priority levels available for your tasks. Priority weights determine sorting order and visual hierarchy in your task views.",
+					"Customize the priority levels available for your tasks. In v4.0+, priorities are sorted alphabetically by their value in Bases views.",
 				howTheyWork: {
 					title: "How priorities work:",
-					value: 'Value: The internal identifier stored in your task files (e.g., "high")',
+					value:
+						'Value: The internal identifier stored in your task files. Use prefixes like "1-urgent", "2-high" to control sort order in Bases views.',
 					label: 'Display Label: The display name shown in the interface (e.g., "High Priority")',
 					color: "Color: Visual indicator color for the priority dot and badges",
-					weight: "Weight: Numeric value for sorting (higher weights appear first in lists)",
-					weightNote:
-						"Tasks are automatically sorted by priority weight in descending order (highest weight first). Weights can be any positive number.",
 				},
 				addNew: {
 					name: "Add new priority",
@@ -878,20 +876,18 @@ export const en: TranslationTree = {
 					buttonText: "Add priority",
 				},
 				validationNote:
-					"Note: You must have at least 1 priority. Higher weights take precedence in sorting and visual hierarchy.",
+					"Note: You must have at least 1 priority. Priorities are sorted alphabetically by value in Bases views.",
 				emptyState: "No custom priorities configured. Add a priority to get started.",
 				emptyStateButton: "Add Priority",
 				fields: {
 					value: "Value:",
 					label: "Label:",
 					color: "Color:",
-					weight: "Weight:",
 				},
 				placeholders: {
 					value: "high",
 					label: "High Priority",
 				},
-				weightLabel: "Weight: {weight}",
 				deleteConfirm: "You must have at least one priority",
 				deleteTooltip: "Delete priority",
 			},
@@ -1102,7 +1098,7 @@ export const en: TranslationTree = {
 			defaultEventVisibility: {
 				header: "Default Event Visibility",
 				description:
-					"Configure which event types are visible by default when opening the Advanced Calendar. Users can still toggle these on/off in the calendar view.",
+					"Configure which event types are visible by default when opening the Calendar. Users can still toggle these on/off in the calendar view.",
 				showScheduledTasks: {
 					name: "Show scheduled tasks",
 					description: "Display tasks with scheduled dates by default",
@@ -1308,6 +1304,36 @@ export const en: TranslationTree = {
 					name: "Enable Bases integration",
 					description:
 						"Enable TaskNotes views to be used within Obsidian Bases plugin. Bases plugin must be enabled for this to work.",
+				},
+				viewCommands: {
+					header: "View commands",
+					description: "Configure which .base files are opened by view commands. These commands let you continue using familiar shortcuts while working with Bases files.",
+					commands: {
+						miniCalendar: "Open mini calendar view",
+						kanban: "Open kanban view",
+						tasks: "Open tasks view",
+						advancedCalendar: "Open advanced calendar view",
+						agenda: "Open agenda view",
+						relationships: "Relationships widget",
+					},
+					fileLabel: "File: {path}",
+					resetButton: "Reset",
+					resetTooltip: "Reset to default path",
+				},
+				createDefaultFiles: {
+					name: "Create default files",
+					description: "Create the default .base files in TaskNotes/Views/ directory. Existing files will not be overwritten.",
+					buttonText: "Create files",
+				},
+				exportV3Views: {
+					name: "Export V3 saved views to Bases",
+					description: "Convert all your saved views from TaskNotes v3 into a single .base file with multiple views. This helps migrate your v3 filter configurations to the new Bases system.",
+					buttonText: "Export V3 views",
+					noViews: "No saved views to export",
+					fileExists: "File already exists",
+					confirmOverwrite: 'A file named "{fileName}" already exists. Overwrite it?',
+					success: "Exported {count} saved views to {filePath}",
+					error: "Failed to export views: {message}",
 				},
 				notices: {
 					enabled:
@@ -1725,7 +1751,7 @@ export const en: TranslationTree = {
 	},
 	commands: {
 		openCalendarView: "Open mini calendar view",
-		openAdvancedCalendarView: "Open advanced calendar view",
+		openAdvancedCalendarView: "Open calendar view",
 		openTasksView: "Open tasks view",
 		openNotesView: "Open notes view",
 		openAgendaView: "Open agenda view",
