@@ -33,6 +33,8 @@ export class MiniCalendarView extends BasesViewBase {
 	private displayedYear: number;
 	private selectedDate: Date; // UTC-anchored
 	private configLoaded = false; // Track if we've successfully loaded config
+	private isInitialRender = true; // Track if this is the first render
+	private shouldRestoreFocus = false; // Track if focus should be restored after render
 
 	// Multi-select mode
 	private multiSelectMode = false;
@@ -99,6 +101,9 @@ export class MiniCalendarView extends BasesViewBase {
 		}
 
 		try {
+			// Check if the grid currently has focus before clearing
+			const gridHadFocus = this.calendarEl.querySelector('.mini-calendar-view__grid') === document.activeElement;
+
 			// Clear calendar
 			this.calendarEl.empty();
 
@@ -112,13 +117,26 @@ export class MiniCalendarView extends BasesViewBase {
 			this.renderCalendarControls();
 			this.renderCalendarGrid();
 
-			// Focus the grid after rendering (with slight delay to ensure DOM is ready)
-			setTimeout(() => {
-				const grid = this.calendarEl?.querySelector('.mini-calendar-view__grid') as HTMLElement;
-				if (grid) {
-					grid.focus();
+			// Focus strategy:
+			// 1. Initial render: auto-focus to enable keyboard navigation
+			// 2. User-initiated re-renders (navigation, interactions): restore focus
+			// 3. Data update re-renders: only restore if it had focus before
+			const shouldFocus = this.isInitialRender || this.shouldRestoreFocus || gridHadFocus;
+
+			if (shouldFocus) {
+				if (this.isInitialRender) {
+					this.isInitialRender = false;
 				}
-			}, 10);
+				this.shouldRestoreFocus = false;
+
+				// Focus the grid after rendering (with slight delay to ensure DOM is ready)
+				setTimeout(() => {
+					const grid = this.calendarEl?.querySelector('.mini-calendar-view__grid') as HTMLElement;
+					if (grid) {
+						grid.focus();
+					}
+				}, 10);
+			}
 		} catch (error: any) {
 			console.error("[TaskNotes][MiniCalendarView] Error rendering:", error);
 			this.renderError(error);
@@ -668,6 +686,7 @@ export class MiniCalendarView extends BasesViewBase {
 		this.displayedMonth = newDate.getUTCMonth();
 		this.displayedYear = newDate.getUTCFullYear();
 		this.monthCalculationCache.clear();
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -678,6 +697,7 @@ export class MiniCalendarView extends BasesViewBase {
 		this.displayedMonth = newDate.getUTCMonth();
 		this.displayedYear = newDate.getUTCFullYear();
 		this.monthCalculationCache.clear();
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -688,6 +708,7 @@ export class MiniCalendarView extends BasesViewBase {
 		this.displayedMonth = todayUTC.getUTCMonth();
 		this.displayedYear = todayUTC.getUTCFullYear();
 		this.monthCalculationCache.clear();
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -822,6 +843,7 @@ export class MiniCalendarView extends BasesViewBase {
 			this.monthCalculationCache.clear();
 		}
 
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -846,6 +868,7 @@ export class MiniCalendarView extends BasesViewBase {
 			this.monthCalculationCache.clear();
 		}
 
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -871,6 +894,7 @@ export class MiniCalendarView extends BasesViewBase {
 			this.monthCalculationCache.clear();
 		}
 
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -885,6 +909,7 @@ export class MiniCalendarView extends BasesViewBase {
 		));
 
 		this.selectedDate = newDate;
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -899,6 +924,7 @@ export class MiniCalendarView extends BasesViewBase {
 		));
 
 		this.selectedDate = newDate;
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -913,6 +939,7 @@ export class MiniCalendarView extends BasesViewBase {
 		this.displayedMonth = newDate.getUTCMonth();
 		this.displayedYear = newDate.getUTCFullYear();
 		this.monthCalculationCache.clear();
+		this.shouldRestoreFocus = true;
 		this.refresh();
 	}
 
@@ -933,6 +960,7 @@ export class MiniCalendarView extends BasesViewBase {
 			this.selectedDates.add(formatDateForStorage(day));
 		});
 
+		this.shouldRestoreFocus = true;
 		this.refresh();
 		this.showCombinedNotes();
 	}

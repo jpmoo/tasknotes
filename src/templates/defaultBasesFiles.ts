@@ -3,12 +3,12 @@
  * These are created in TaskNotes/Views/ directory when the user first uses the commands
  *
  * ⚠️ IMPORTANT: Changes to these templates should be reflected in the documentation at:
- *    obsidian-help/en/Bases/Default base templates.md
+ *    docs/views/default-base-templates.md
  *
  * When updating templates:
  * 1. Update the template generation code below
  * 2. Update the documentation with example output using DEFAULT_SETTINGS from src/settings/defaults.ts
- * 3. Ensure all Bases syntax is valid according to obsidian-help/en/Bases/Bases syntax.md
+ * 3. Ensure all Bases syntax is valid according to https://help.obsidian.md/Bases/Bases+syntax
  */
 
 import type { TaskNotesSettings } from "../types/settings";
@@ -71,6 +71,17 @@ function getPropertyName(fullPath: string): string {
 function mapPropertyToBasesProperty(property: string, plugin: TaskNotesPlugin): string {
 	const fm = plugin.fieldMapper;
 
+	// Handle user-defined fields (format: "user:field_xxx")
+	if (property.startsWith("user:")) {
+		const fieldId = property.substring(5); // Remove "user:" prefix
+		const userField = plugin.settings.userFields?.find(f => f.id === fieldId);
+		if (userField) {
+			return userField.key;
+		}
+		// If field not found, return the ID as-is (shouldn't happen in normal use)
+		return property;
+	}
+
 	// Handle special Bases-specific properties first
 	switch (property) {
 		case "tags":
@@ -87,6 +98,9 @@ function mapPropertyToBasesProperty(property: string, plugin: TaskNotesPlugin): 
 			return fm.toUserField("blockedBy");
 		case "complete_instances":
 			return fm.toUserField("completeInstances");
+		case "totalTrackedTime":
+			// totalTrackedTime is computed from timeEntries, use the timeEntries property
+			return fm.toUserField("timeEntries");
 	}
 
 	// Try to map using FieldMapper
@@ -195,7 +209,8 @@ ${orderYaml}
     dateProperty: file.mtime
 `;
 		}
-		case 'open-kanban-view':
+		case 'open-kanban-view': {
+			const statusProperty = getPropertyName(mapPropertyToBasesProperty('status', plugin));
 			return `# Kanban Board
 
 ${formatFilterAsYAML([taskFilterCondition])}
@@ -205,10 +220,14 @@ views:
     name: "Kanban Board"
     order:
 ${orderYaml}
+    groupBy:
+      property: ${statusProperty}
+      direction: ASC
     options:
       columnWidth: 280
       hideEmptyColumns: false
 `;
+		}
 
 		case 'open-tasks-view': {
 			const statusProperty = mapPropertyToBasesProperty('status', plugin);
@@ -216,6 +235,7 @@ ${orderYaml}
 			const scheduledProperty = mapPropertyToBasesProperty('scheduled', plugin);
 			const recurrenceProperty = mapPropertyToBasesProperty('recurrence', plugin);
 			const completeInstancesProperty = mapPropertyToBasesProperty('completeInstances', plugin);
+			const blockedByProperty = mapPropertyToBasesProperty('blockedBy', plugin);
 
 			// Get all completed status values
 			const completedStatuses = settings.customStatuses
@@ -228,6 +248,12 @@ ${orderYaml}
 				.map(status => `${statusProperty} != "${status}"`)
 				.join('\n            - ');
 
+			// Generate filter condition for checking if a blocking task is incomplete
+			// This is used in the "Not Blocked" view to filter out completed blocking tasks
+			const blockingTaskIncompleteCondition = completedStatuses
+				.map(status => `file(value.uid).properties.${getPropertyName(statusProperty)} != "${status}"`)
+				.join(' && ');
+
 			return `# All Tasks
 
 ${formatFilterAsYAML([taskFilterCondition])}
@@ -235,6 +261,31 @@ ${formatFilterAsYAML([taskFilterCondition])}
 views:
   - type: tasknotesTaskList
     name: "All Tasks"
+    order:
+${orderYaml}
+    sort:
+      - column: due
+        direction: ASC
+  - type: tasknotesTaskList
+    name: "Not Blocked"
+    filters:
+      and:
+        # Incomplete tasks
+        - or:
+          # Non-recurring task that's not in any completed status
+          - and:
+            - ${recurrenceProperty}.isEmpty()
+            - ${nonRecurringIncompleteFilter}
+          # Recurring task where today is not in complete_instances
+          - and:
+            - ${recurrenceProperty}
+            - "!${completeInstancesProperty}.contains(today().format(\\"yyyy-MM-dd\\"))"
+        # Not blocked by any incomplete tasks
+        - or:
+          # No blocking dependencies at all
+          - ${blockedByProperty}.isEmpty()
+          # All blocking tasks are completed (filter returns only incomplete, then check if empty)
+          - 'list(${blockedByProperty}).filter(${blockingTaskIncompleteCondition}).isEmpty()'
     order:
 ${orderYaml}
     sort:

@@ -1,7 +1,7 @@
 {
 	"id": "tasknotes-fork",
 	"name": "TaskNotes Fork",
-	"version": "4.0.1",
+	"version": "4.0.3",
 	"minAppVersion": "1.10.1",
 	"description": "Note-based task management with calendar, pomodoro and time-tracking integration.",
 	"author": "Callum Alpass",
