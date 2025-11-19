@@ -30,6 +30,7 @@ import {
 	DEFAULT_DEPENDENCY_RELTYPE,
 	formatDependencyLink,
 	normalizeDependencyEntry,
+	normalizeDependencyList,
 	resolveDependencyEntry,
 } from "../utils/dependencyUtils";
 import {
@@ -602,6 +603,36 @@ export class TaskService {
 							task.path
 						);
 
+						// If task was just completed, remove blocking relationships from all blocked tasks
+						if (!wasCompleted && isNowCompleted) {
+							for (const blockedTaskPath of dependentTaskPaths) {
+								try {
+									const blockedTask = await this.plugin.cacheManager.getTaskInfo(blockedTaskPath);
+									if (!blockedTask) {
+										continue;
+									}
+
+									// Remove this task from the blocked task's blockedBy field
+									const updatedBlockedBy = this.computeBlockedByUpdate(
+										blockedTask,
+										task.path,
+										"remove"
+									);
+
+									if (updatedBlockedBy !== null) {
+										await this.updateTask(blockedTask, {
+											blockedBy: updatedBlockedBy.length > 0 ? updatedBlockedBy : undefined,
+										});
+									}
+								} catch (error) {
+									console.error(
+										`Error removing blocking relationship from ${blockedTaskPath} when ${task.path} was completed:`,
+										error
+									);
+								}
+							}
+						}
+
 						// Trigger updates for each dependent task so their UI can refresh
 						for (const dependentPath of dependentTaskPaths) {
 							try {
@@ -1156,10 +1187,30 @@ export class TaskService {
 			}
 
 			await this.plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				// If blockedBy is not being updated, read it from the current frontmatter to preserve it
+				// This ensures blocking relationships are not lost when updating other fields
+				let preservedBlockedBy: TaskDependency[] | undefined = undefined;
+				if (!updates.hasOwnProperty("blockedBy")) {
+					const blockedByField = this.plugin.fieldMapper.toUserField("blockedBy");
+					if (frontmatter[blockedByField] !== undefined) {
+						const normalized = normalizeDependencyList(frontmatter[blockedByField]);
+						if (normalized && normalized.length > 0) {
+							preservedBlockedBy = normalized;
+						}
+					}
+				}
+
 				const completeTaskData: Partial<TaskInfo> = {
 					...originalTask,
 					...updates,
 					...recurrenceUpdates,
+					// Preserve blockedBy from frontmatter if it's not explicitly being updated
+					// Use hasOwnProperty to distinguish between "not set" (preserve) and "explicitly undefined" (remove)
+					blockedBy: updates.hasOwnProperty("blockedBy")
+						? updates.blockedBy
+						: (originalTask.blockedBy && originalTask.blockedBy.length > 0 
+							? originalTask.blockedBy 
+							: preservedBlockedBy),
 					dateModified: getCurrentTimestamp(),
 				};
 
@@ -1247,6 +1298,7 @@ export class TaskService {
 					}
 					frontmatter.tags = tagsToSet;
 				}
+
 			});
 
 			// Step 2: Rename the file if needed, after frontmatter is updated
@@ -1322,7 +1374,49 @@ export class TaskService {
 				});
 			}
 
-			// Step 5: Notify system of change
+			// Step 5: If status changed to completed, remove blocking relationships from blocked tasks
+			if (updates.status !== undefined && updates.status !== originalTask.status) {
+				const wasCompleted = this.plugin.statusManager.isCompletedStatus(originalTask.status);
+				const isNowCompleted = this.plugin.statusManager.isCompletedStatus(updates.status);
+
+				if (!wasCompleted && isNowCompleted) {
+					// Task was just completed, remove blocking relationships from all blocked tasks
+					// Use originalTask.path since the dependency cache may not be updated with newPath yet
+					const taskPathForLookup = isRenameNeeded ? originalTask.path : newPath;
+					const blockedTaskPaths = this.plugin.cacheManager.getBlockedTaskPaths(taskPathForLookup);
+					
+					for (const blockedTaskPath of blockedTaskPaths) {
+						try {
+							const blockedTask = await this.plugin.cacheManager.getTaskInfo(blockedTaskPath);
+							if (!blockedTask) {
+								continue;
+							}
+
+							// Remove this task from the blocked task's blockedBy field
+							// Use the path that the blocked task knows about (could be old or new)
+							const blockingTaskPath = isRenameNeeded ? originalTask.path : newPath;
+							const updatedBlockedBy = this.computeBlockedByUpdate(
+								blockedTask,
+								blockingTaskPath,
+								"remove"
+							);
+
+							if (updatedBlockedBy !== null) {
+								await this.updateTask(blockedTask, {
+									blockedBy: updatedBlockedBy.length > 0 ? updatedBlockedBy : undefined,
+								});
+							}
+						} catch (error) {
+							console.error(
+								`Error removing blocking relationship from ${blockedTaskPath} when ${taskPathForLookup} was completed:`,
+								error
+							);
+						}
+					}
+				}
+			}
+
+			// Step 6: Notify system of change
 			try {
 				this.plugin.emitter.trigger(EVENT_TASK_UPDATED, {
 					path: newPath,

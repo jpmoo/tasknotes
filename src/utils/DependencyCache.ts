@@ -124,9 +124,27 @@ export class DependencyCache extends Events {
 			return;
 		}
 
+		// Get list of tasks that reference this task in their blockedBy before clearing
+		// This ensures we can re-index them after this task is updated
+		const tasksThatBlockThis = this.dependencyTargets.get(file.path);
+		const blockedTaskPaths = tasksThatBlockThis ? Array.from(tasksThatBlockThis) : [];
+
 		// Re-index this task
 		this.clearFileFromIndexes(file.path);
 		this.indexTaskFile(file.path, metadata.frontmatter);
+
+		// Re-index all tasks that have this task in their blockedBy field
+		// This ensures dependencyTargets for this task is properly maintained
+		for (const blockedTaskPath of blockedTaskPaths) {
+			const blockedFile = this.app.vault.getAbstractFileByPath(blockedTaskPath);
+			if (blockedFile instanceof TFile) {
+				const blockedMetadata = this.app.metadataCache.getFileCache(blockedFile);
+				if (blockedMetadata?.frontmatter && this.isTaskFileCallback(blockedMetadata.frontmatter)) {
+					// Re-index the blocked task to update dependencyTargets for this task
+					this.indexTaskFile(blockedTaskPath, blockedMetadata.frontmatter);
+				}
+			}
+		}
 	}
 
 	/**
