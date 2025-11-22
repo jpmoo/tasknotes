@@ -22,9 +22,8 @@
     border-left: 3px solid transparent; /* Transparent by default */
     
     /* Interactions & Accessibility - Simplified */
-    cursor: pointer;
+    cursor: var(--cursor);
     transition: background-color var(--tn-transition-fast);
-    will-change: background-color;
     outline: none;
     role: listitem;
     tabindex: 0;
@@ -283,9 +282,8 @@
     border: none;
     border-bottom: 1px solid var(--tn-border-color);
     border-radius: 0;
-    cursor: pointer;
+    cursor: var(--cursor);
     transition: background-color var(--tn-transition-fast);
-    will-change: background-color;
 }
 
 .tasknotes-plugin .tn-card:hover {

@@ -50,7 +50,7 @@
     background: transparent;
     color: var(--tn-text-normal);
     font-size: var(--tn-font-size-sm);
-    cursor: pointer;
+    cursor: var(--cursor);
     transition: all var(--tn-transition-fast);
 }
 
@@ -86,36 +86,27 @@
     color: var(--tn-text-normal);
 }
 
-/* Use consistent button system */
 .tasknotes-plugin .calendar-view__nav-button,
 .tasknotes-plugin .mini-calendar-view__nav-button {
-    /* Remove individual styles - use tn-btn tn-btn--icon tn-btn--ghost classes */
     width: 32px;
     height: 32px;
     font-size: 16px;
     font-weight: 500;
+    border: none;
+    box-shadow: none;
+    background: transparent;
 }
 
-.tasknotes-plugin .calendar-view__nav-button--prev,
-.tasknotes-plugin .mini-calendar-view__nav-button--prev {
-    /* Specific styling for previous button if needed */
-}
-
-.tasknotes-plugin .calendar-view__nav-button--next,
-.tasknotes-plugin .mini-calendar-view__nav-button--next {
-    /* Specific styling for next button if needed */
-}
-
-/* Use consistent button system */
 .tasknotes-plugin .calendar-view__today-button,
 .tasknotes-plugin .mini-calendar-view__today-button {
-    /* Remove individual styles - use tn-btn tn-btn--ghost tn-btn--sm classes */
     margin-left: auto;
     border: none;
+    box-shadow: none;
+    background: transparent;
     font-weight: normal;
     opacity: 0.7;
     transition: opacity var(--tn-transition-fast);
-    cursor: pointer;
+    cursor: var(--cursor);
     border-radius: var(--tn-radius-sm);
     font-size: var(--tn-font-size-lg);
 }
@@ -221,7 +212,7 @@
     min-height: 2rem;
     padding: var(--tn-spacing-xs);
     text-align: center;
-    cursor: pointer;
+    cursor: var(--cursor);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -244,7 +235,7 @@
 /* Calendar Day - Today State */
 .tasknotes-plugin .calendar-view__day--today,
 .tasknotes-plugin .mini-calendar-view__day--today {
-    background: color-mix(in srgb, var(--tn-interactive-accent) 8%, transparent) !important;
+    background: var(--tn-interactive-hover) !important;
     color: var(--tn-interactive-accent);
     font-weight: 600;
     box-shadow: none;
@@ -556,7 +547,7 @@
 }
 
 .tasknotes-plugin .mini-calendar-view__legend-summary {
-    cursor: pointer;
+    cursor: var(--cursor);
     list-style: none;
     padding: calc(var(--tn-spacing-xs) * 0.25) 0;
 }
@@ -975,7 +966,7 @@
     font-weight: 600;
     color: var(--tn-text-muted);
     background: var(--tn-bg-secondary);
-    cursor: pointer;
+    cursor: var(--cursor);
     transition: all var(--tn-transition-fast);
     border-right: 1px solid var(--tn-border-color);
 }

@@ -8,6 +8,7 @@ import { createTaskCard } from "../ui/TaskCard";
 import { renderGroupTitle } from "./groupTitleRenderer";
 import { type LinkServices } from "../ui/renderers/linkRenderer";
 import { VirtualScroller } from "../utils/VirtualScroller";
+import { getDatePart, parseDateToUTC } from "../utils/dateUtils";
 
 export class KanbanView extends BasesViewBase {
 	type = "tasknoteKanban";
@@ -870,10 +871,19 @@ export class KanbanView extends BasesViewBase {
 		// Strip Bases prefix to get the frontmatter key
 		const frontmatterKey = basesPropertyId.replace(/^(note\.|file\.|task\.)/, '');
 
-		// Update the frontmatter directly
-		await this.plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			frontmatter[frontmatterKey] = value;
-		});
+		const task = await this.plugin.cacheManager.getTaskInfo(taskPath);
+		const taskProperty = this.plugin.fieldMapper.lookupMappingKey(frontmatterKey);
+
+		if (task && taskProperty) {
+			// Update the task property using updateProperty to ensure all business logic runs
+			// (e.g., completedDate updates, auto-archive queueing, webhooks, etc.)
+			await this.plugin.taskService.updateProperty(task, taskProperty as keyof TaskInfo, value);
+		} else {
+			// Update the frontmatter directly for custom/unrecognized properties
+			await this.plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				frontmatter[frontmatterKey] = value;
+			});
+		}
 	}
 
 	protected setupContainer(): void {
@@ -1072,7 +1082,7 @@ export class KanbanView extends BasesViewBase {
 		event.stopPropagation();
 
 		const { showTaskContextMenu } = await import("../ui/TaskCard");
-		await showTaskContextMenu(event, context.task.path, this.plugin, new Date());
+		await showTaskContextMenu(event, context.task.path, this.plugin, this.getTaskActionDate(context.task));
 	};
 
 	private async handleCardAction(
@@ -1110,7 +1120,7 @@ export class KanbanView extends BasesViewBase {
 				this.showReminderModal(task, ReminderModal);
 				return;
 			case "task-context-menu":
-				await showTaskContextMenu(event, task.path, this.plugin, new Date());
+				await showTaskContextMenu(event, task.path, this.plugin, this.getTaskActionDate(task));
 				return;
 			case "edit-date":
 				await this.openDateContextMenu(task, target.dataset.tnDateType as "due" | "scheduled" | undefined, event, DateContextMenu);
@@ -1127,13 +1137,27 @@ export class KanbanView extends BasesViewBase {
 	private async handleToggleStatus(task: TaskInfo, event: MouseEvent): Promise<void> {
 		try {
 			if (task.recurrence) {
-				await this.plugin.toggleRecurringTaskComplete(task, new Date());
+				const actionDate = this.getTaskActionDate(task);
+				await this.plugin.toggleRecurringTaskComplete(task, actionDate);
 			} else {
 				await this.plugin.toggleTaskStatus(task);
 			}
 		} catch (error) {
 			console.error("[TaskNotes][KanbanView] Failed to toggle status", error);
 		}
+	}
+
+	/**
+	 * Determine the date to use when completing a recurring task from Bases.
+	 * Prefers the task's scheduled (or due) date to avoid marking the wrong instance.
+	 */
+	private getTaskActionDate(task: TaskInfo): Date {
+		const dateStr = getDatePart(task.scheduled || task.due || "");
+		if (dateStr) {
+			return parseDateToUTC(dateStr);
+		}
+
+		return new Date();
 	}
 
 	private showPriorityMenu(task: TaskInfo, event: MouseEvent, PriorityContextMenu: any): void {
