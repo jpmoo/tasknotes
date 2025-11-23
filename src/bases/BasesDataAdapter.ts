@@ -12,20 +12,15 @@ export class BasesDataAdapter {
 	 * Uses public API: basesView.data.data
 	 */
 	extractDataItems(): BasesDataItem[] {
-		if (!this.basesView?.data?.data || !Array.isArray(this.basesView.data.data)) {
-			return [];
-		}
 		const entries = this.basesView.data.data;
-		return entries
-			.filter((entry: any) => entry?.file?.path) // Filter out invalid entries
-			.map((entry: any) => ({
-				key: entry.file.path,
-				data: entry,
-				file: entry.file,
-				path: entry.file.path,
-				properties: this.extractEntryProperties(entry),
-				basesData: entry,
-			}));
+		return entries.map((entry: any) => ({
+			key: entry.file.path,
+			data: entry,
+			file: entry.file,
+			path: entry.file.path,
+			properties: this.extractEntryProperties(entry),
+			basesData: entry,
+		}));
 	}
 
 	/**
@@ -98,6 +93,7 @@ export class BasesDataAdapter {
 			return null;
 		}
 	}
+
 
 	/**
 	 * Convert Bases Value object to native JavaScript value.
@@ -212,8 +208,46 @@ export class BasesDataAdapter {
 		// This ensures all properties are available for TaskInfo creation
 		const frontmatter = (entry as any).frontmatter || (entry as any).properties || {};
 
-		// Return a copy to avoid mutations affecting the original
-		return { ...frontmatter };
+		// Start with frontmatter properties
+		const result = { ...frontmatter };
+
+		// Also extract file properties directly from the TFile object
+		const file = entry.file;
+		if (file) {
+			// Add common TFile properties with file. prefix
+			if (file.name !== undefined) result['file.name'] = file.name;
+			if (file.basename !== undefined) result['file.basename'] = file.basename;
+			if (file.extension !== undefined) result['file.extension'] = file.extension;
+			if (file.path !== undefined) result['file.path'] = file.path;
+
+			// Add file stats if available
+			if (file.stat) {
+				if (file.stat.size !== undefined) result['file.size'] = file.stat.size;
+				if (file.stat.ctime !== undefined) result['file.ctime'] = file.stat.ctime;
+				if (file.stat.mtime !== undefined) result['file.mtime'] = file.stat.mtime;
+			}
+		}
+
+		// Extract computed file properties from Bases (links, embeds, tags, backlinks, etc.)
+		// These come from CachedMetadata and are computed by Bases
+		const computedFileProperties = [
+			'links', 'embeds', 'tags', 'backlinks', 'ext', 'aliases', 'folder', 'tasks', 'fullname'
+		];
+
+		for (const prop of computedFileProperties) {
+			const propertyId = `file.${prop}`;
+			try {
+				const value = entry.getValue(propertyId);
+				const nativeValue = this.convertValueToNative(value);
+				if (nativeValue !== null && nativeValue !== undefined) {
+					result[propertyId] = nativeValue;
+				}
+			} catch (e) {
+				// Property not available or error accessing it - skip
+			}
+		}
+
+		return result;
 	}
 
 	/**

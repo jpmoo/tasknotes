@@ -93,45 +93,48 @@ export class CalendarView extends BasesViewBase {
 	private calendarEl: HTMLElement | null = null;
 	private currentTasks: TaskInfo[] = [];
 	private basesEntryByPath: Map<string, any> = new Map(); // Map task path to Bases entry for enrichment
-
-	// View options (read from config)
-	private viewOptions = {
+	
+	private viewOptions: {
 		// Events
-		showScheduled: true,
-		showDue: true,
-		showRecurring: true,
-		showTimeEntries: true,
-		showTimeblocks: true,
-		showPropertyBasedEvents: true,
+		showScheduled: boolean;
+		showDue: boolean;
+		showRecurring: boolean;
+		showTimeEntries: boolean;
+		showTimeblocks: boolean;
+		showPropertyBasedEvents: boolean;
 
 		// Date navigation
-		initialDate: "",
-		initialDateProperty: null as string | null,
-		initialDateStrategy: "first" as "first" | "earliest" | "latest",
+		initialDate: string;
+		initialDateProperty: string | null;
+		initialDateStrategy: "first" | "earliest" | "latest";
 
 		// Layout
-		calendarView: "dayGridMonth",
-		customDayCount: 3,
-		listDayCount: 7,
-		slotMinTime: "06:00:00",
-		slotMaxTime: "22:00:00",
-		slotDuration: "00:30:00",
-		firstDay: 1,
-		weekNumbers: false,
-		nowIndicator: true,
-		showWeekends: true,
-		showAllDaySlot: true,
-		showTodayHighlight: true,
-		selectMirror: true,
-		timeFormat: "24",
-		scrollTime: "08:00:00",
-		eventMinHeight: 30,
+		calendarView: string;
+		customDayCount: number;
+		listDayCount: number;
+		slotMinTime: string;
+		slotMaxTime: string;
+		slotDuration: string;
+		firstDay: number;
+		weekNumbers: boolean;
+		nowIndicator: boolean;
+		showWeekends: boolean;
+		showAllDaySlot: boolean;
+		showTodayHighlight: boolean;
+		selectMirror: boolean;
+		timeFormat: string;
+		scrollTime: string;
+		eventMinHeight: number;
+		// Locale (non-configurable per view)
+		locale: string;
 
 		// Property-based events
-		startDateProperty: null as string | null,
-		endDateProperty: null as string | null,
-		titleProperty: null as string | null,
+		startDateProperty: string | null;
+		endDateProperty: string | null;
+		titleProperty: string | null;
+
 	};
+
 
 	// ICS/Google/Microsoft calendar toggles (dynamic)
 	private icsCalendarToggles = new Map<string, boolean>();
@@ -145,6 +148,46 @@ export class CalendarView extends BasesViewBase {
 		(this.dataAdapter as any).basesView = this;
 		// Note: Don't read config here - this.config is not set until after construction
 		// readViewOptions() will be called in onload()
+		// View options (read from config)
+		const calendarSettings = this.plugin.settings.calendarViewSettings;
+		this.viewOptions = {
+			// Events
+			showScheduled: calendarSettings.defaultShowScheduled,
+			showDue: calendarSettings.defaultShowDue, 
+			showRecurring: calendarSettings.defaultShowRecurring,
+			showTimeEntries: calendarSettings.defaultShowTimeEntries,
+			showTimeblocks: calendarSettings.defaultShowTimeblocks,
+			showPropertyBasedEvents: true,
+
+			// Date navigation
+			initialDate: "",
+			initialDateProperty: null as string | null,
+			initialDateStrategy: "first" as "first" | "earliest" | "latest",
+
+			// Layout
+			calendarView: calendarSettings.defaultView,
+			customDayCount: calendarSettings.customDayCount,
+			listDayCount: 7,
+			slotMinTime: this.validateTimeValue(calendarSettings.slotMinTime, "00:00:00", false),
+			slotMaxTime: this.validateTimeValue(calendarSettings.slotMaxTime, "24:00:00", true), 
+			slotDuration: this.validateTimeValue( calendarSettings.slotDuration, "00:30:00", false),
+			scrollTime: this.validateTimeValue( calendarSettings.scrollTime, "08:00:00", false),
+			firstDay: calendarSettings.firstDay,
+			weekNumbers: calendarSettings.weekNumbers,
+			nowIndicator: calendarSettings.nowIndicator,
+			showWeekends: calendarSettings.showWeekends,
+			showAllDaySlot: true,
+			showTodayHighlight: calendarSettings.showTodayHighlight,
+			selectMirror: calendarSettings.selectMirror,
+			timeFormat: calendarSettings.timeFormat,
+			eventMinHeight: calendarSettings.eventMinHeight,
+			locale: calendarSettings.locale,
+
+			// Property-based events
+			startDateProperty: null as string | null,
+			endDateProperty: null as string | null,
+			titleProperty: null as string | null,
+		};
 	}
 
 	/**
@@ -445,7 +488,7 @@ export class CalendarView extends BasesViewBase {
 			expandRows: true,
 			handleWindowResize: true,
 			stickyHeaderDates: false,
-			locale: navigator.language || "en",
+			locale: this.viewOptions.locale || this.plugin.settings.uiLanguage || navigator.language || "en",
 			slotMinTime: this.viewOptions.slotMinTime,
 			slotMaxTime: this.viewOptions.slotMaxTime,
 			slotDuration: this.viewOptions.slotDuration,

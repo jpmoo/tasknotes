@@ -24,13 +24,3 @@ Example:
 
 -->
 
-## Fixed
-
-- (#1203) Fixed autocomplete dropdown being clipped inside NLP field boundaries
-	- Configure CodeMirror tooltips to render in document.body instead of constrained editor container
-	- Prevents suggestion dropdown from being hidden when it extends beyond the NLP field height
-	- Thanks to @Andrei-Ioda for reporting
-- (#1172) Fixed task lists and checkboxes rendering incorrectly in task details editor
-	- Remove padding-left override on `.cm-line` to allow CodeMirror decorations (checkboxes, indentation) to render properly
-	- Content padding is now handled by `.cm-content` while `.cm-line` uses natural spacing
-	- Thanks to @nightroman for reporting
