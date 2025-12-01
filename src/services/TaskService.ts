@@ -284,6 +284,7 @@ export class TaskService {
 				dateCreated: dateCreated,
 				dateModified: dateModified,
 				recurrence: taskData.recurrence || undefined,
+				recurrence_anchor: taskData.recurrence_anchor || undefined,
 				reminders:
 					taskData.reminders && taskData.reminders.length > 0
 						? taskData.reminders

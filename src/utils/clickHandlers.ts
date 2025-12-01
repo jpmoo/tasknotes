@@ -78,6 +78,29 @@ export function createTaskClickHandler(options: ClickHandlerOptions) {
 			}
 		}
 
+		// Check for selection mode - only shift+click triggers selection
+		const selectionService = plugin.taskSelectionService;
+		if (selectionService) {
+			if (e.shiftKey) {
+				e.stopPropagation();
+
+				// Enter selection mode if not already active
+				if (!selectionService.isSelectionModeActive()) {
+					selectionService.enterSelectionMode();
+				}
+
+				// Toggle selection for this task
+				selectionService.toggleSelection(task.path);
+				return;
+			}
+
+			// Regular click without shift exits selection mode
+			if (selectionService.isSelectionModeActive()) {
+				selectionService.clearSelection();
+				selectionService.exitSelectionMode();
+			}
+		}
+
 		// Stop propagation to prevent clicks from bubbling to parent cards
 		e.stopPropagation();
 
@@ -105,6 +128,57 @@ export function createTaskClickHandler(options: ClickHandlerOptions) {
 	const contextmenuHandler = async (e: MouseEvent) => {
 		e.preventDefault();
 		e.stopPropagation(); // Prevent event from bubbling to parent cards
+
+		const selectionService = plugin.taskSelectionService;
+
+		// Shift+right-click adds to selection and opens batch context menu
+		if (e.shiftKey && selectionService) {
+			if (!selectionService.isSelectionModeActive()) {
+				selectionService.enterSelectionMode();
+			}
+			if (!selectionService.isSelected(task.path)) {
+				selectionService.addToSelection(task.path);
+			}
+
+			// Show batch context menu if we have selections
+			if (selectionService.getSelectionCount() > 0) {
+				const { BatchContextMenu } = require("../components/BatchContextMenu");
+				const menu = new BatchContextMenu({
+					plugin,
+					selectedPaths: selectionService.getSelectedPaths(),
+					onUpdate: () => {},
+				});
+				menu.show(e);
+			}
+			return;
+		}
+
+		// Check if multiple tasks are selected - show batch context menu
+		if (selectionService && selectionService.getSelectionCount() > 1) {
+			// Ensure the right-clicked task is in the selection
+			if (!selectionService.isSelected(task.path)) {
+				selectionService.addToSelection(task.path);
+			}
+
+			// Import and show batch context menu
+			const { BatchContextMenu } = require("../components/BatchContextMenu");
+			const menu = new BatchContextMenu({
+				plugin,
+				selectedPaths: selectionService.getSelectedPaths(),
+				onUpdate: () => {
+					// Views will refresh via events
+				},
+			});
+			menu.show(e);
+			return;
+		}
+
+		// Opening a single-task context menu exits selection mode
+		if (selectionService?.isSelectionModeActive()) {
+			selectionService.clearSelection();
+			selectionService.exitSelectionMode();
+		}
+
 		if (contextMenuHandler) {
 			await contextMenuHandler(e);
 		}

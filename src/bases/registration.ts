@@ -31,9 +31,15 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 						displayName: "Sub-group by",
 						placeholder: "Select property for sub-grouping (optional)",
 						filter: (prop: string) => {
-							// Show all note and task properties that could be used for sub-grouping
-							return prop.startsWith("note.") || prop.startsWith("task.");
+							// Show all note, task, and formula properties that could be used for sub-grouping
+							return prop.startsWith("note.") || prop.startsWith("task.") || prop.startsWith("formula.");
 						},
+					},
+					{
+						type: "toggle",
+						key: "enableSearch",
+						displayName: "Enable search box",
+						default: false,
 					},
 				],
 			});
@@ -50,8 +56,8 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 						displayName: "Swim Lane",
 						placeholder: "Select property for swim lanes (optional)",
 						filter: (prop: string) => {
-							// Show all note properties that could be used for swimlanes
-							return prop.startsWith("note.") || prop.startsWith("task.");
+							// Show all note, task, and formula properties that could be used for swimlanes
+							return prop.startsWith("note.") || prop.startsWith("task.") || prop.startsWith("formula.");
 						},
 					},
 					{
@@ -77,6 +83,18 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 						key: "hideEmptyColumns",
 						displayName: "Hide Empty Columns",
 						default: false,
+					},
+					{
+						type: "toggle",
+						key: "enableSearch",
+						displayName: "Enable search box",
+						default: false,
+					},
+					{
+						type: "toggle",
+						key: "explodeListColumns",
+						displayName: "Show items in multiple columns",
+						default: true,
 					},
 					{
 						type: "multitext",
@@ -283,6 +301,18 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 										default: calendarSettings.selectMirror,
 									},
 									{
+										type: "toggle",
+										key: "slotEventOverlap",
+										displayName: t("layout.slotEventOverlap"),
+										default: calendarSettings.slotEventOverlap,
+									},
+									{
+										type: "toggle",
+										key: "enableSearch",
+										displayName: t("layout.enableSearch"),
+										default: false,
+									},
+									{
 										type: "dropdown",
 										key: "timeFormat",
 										displayName: t("layout.timeFormat"),
@@ -307,6 +337,33 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 										min: 15,
 										max: 100,
 										step: 5,
+									},
+									{
+										type: "slider",
+										key: "eventMaxStack",
+										displayName: t("layout.eventMaxStack"),
+										default: calendarSettings.eventMaxStack ?? 0,
+										min: 0,
+										max: 10,
+										step: 1,
+									},
+									{
+										type: "slider",
+										key: "dayMaxEvents",
+										displayName: t("layout.dayMaxEvents"),
+										default: typeof calendarSettings.dayMaxEvents === 'number' ? calendarSettings.dayMaxEvents : 0,
+										min: 0,
+										max: 20,
+										step: 1,
+									},
+									{
+										type: "slider",
+										key: "dayMaxEventRows",
+										displayName: t("layout.dayMaxEventRows"),
+										default: typeof calendarSettings.dayMaxEventRows === 'number' ? calendarSettings.dayMaxEventRows : 0,
+										min: 0,
+										max: 10,
+										step: 1,
 									},
 								],
 							},

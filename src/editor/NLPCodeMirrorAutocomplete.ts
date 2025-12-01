@@ -12,6 +12,9 @@ import { keymap } from "@codemirror/view";
 import TaskNotesPlugin from "../main";
 import { NaturalLanguageParser } from "../services/NaturalLanguageParser";
 import { TriggerConfigService } from "../services/TriggerConfigService";
+import { FileSuggestHelper } from "../suggest/FileSuggestHelper";
+import { ProjectMetadataResolver, ProjectEntry } from "../utils/projectMetadataResolver";
+import { parseDisplayFieldsRow } from "../utils/projectAutosuggestDisplayFieldsParser";
 
 /**
  * CodeMirror autocomplete extension for NLP triggers with configurable trigger support
@@ -129,6 +132,29 @@ export function createNLPAutocomplete(plugin: TaskNotesPlugin): Extension[] {
 		closeOnBlur: true,
 		// Max options to show
 		maxRenderedOptions: 10,
+		// Custom rendering for project suggestions with metadata
+		addToOptions: [
+			{
+				render: (completion: any, _state: any, _view: any) => {
+					// Only render custom content for project suggestions with metadata
+					if (!completion.projectMetadata) return null;
+
+					const container = document.createElement("div");
+					container.className = "cm-project-suggestion__metadata";
+
+					const metadata = completion.projectMetadata;
+					for (const row of metadata) {
+						const metaRow = document.createElement("div");
+						metaRow.className = "cm-project-suggestion__meta";
+						metaRow.textContent = row;
+						container.appendChild(metaRow);
+					}
+
+					return container;
+				},
+				position: 100, // After label (50) and detail (80)
+			},
+		],
 	});
 
 	// Add explicit keyboard navigation for autocomplete with high priority
@@ -234,8 +260,6 @@ async function getFileSuggestions(
 	triggerConfig: TriggerConfigService
 ): Promise<Completion[]> {
 	try {
-		const { FileSuggestHelper } = await import("../suggest/FileSuggestHelper");
-
 		// Get autosuggest config - use projectAutosuggest for projects,
 		// or user field's autosuggestFilter for user fields
 		let autosuggestConfig;
@@ -262,6 +286,63 @@ async function getFileSuggestions(
 			return !excluded.some((ex) => file.path.startsWith(ex));
 		});
 
+		// For projects, add rich metadata rendering
+		if (propertyId === "projects") {
+			const resolver = new ProjectMetadataResolver({
+				getFrontmatter: (entry) => entry.frontmatter,
+			});
+			const rowConfigs = (plugin.settings?.projectAutosuggest?.rows ?? []).slice(0, 3);
+
+			return filteredList.map((item) => {
+				const displayText = item.displayText || item.insertText;
+				const insertText = item.insertText;
+
+				// Get file metadata for rendering
+				const file = plugin.app.vault
+					.getMarkdownFiles()
+					.find((f) => f.basename === item.insertText);
+
+				// Build metadata rows using shared utility
+				let metadataRows: string[] = [];
+				if (file && rowConfigs.length > 0) {
+					const cache = plugin.app.metadataCache.getFileCache(file);
+					const frontmatter: Record<string, any> = cache?.frontmatter || {};
+					const mapped = plugin.fieldMapper.mapFromFrontmatter(
+						frontmatter,
+						file.path,
+						plugin.settings.storeTitleInFilename
+					);
+
+					const title = typeof mapped.title === "string" ? mapped.title : "";
+					const aliases = Array.isArray(frontmatter["aliases"])
+						? (frontmatter["aliases"] as any[]).filter((a: any) => typeof a === "string")
+						: [];
+
+					const fileData: ProjectEntry = {
+						basename: file.basename,
+						name: file.name,
+						path: file.path,
+						parent: file.parent?.path || "",
+						title,
+						aliases,
+						frontmatter,
+					};
+
+					metadataRows = resolver.buildMetadataRows(rowConfigs, fileData, parseDisplayFieldsRow);
+				}
+
+				return {
+					label: displayText,
+					apply: `[[${insertText}]] `,
+					type: "text",
+					info: "Project",
+					// Add metadata as a custom property for the render function
+					projectMetadata: metadataRows.length > 0 ? metadataRows : undefined,
+				} as any;
+			});
+		}
+
+		// For non-project file suggestions, use simple rendering
 		return filteredList.map((item) => {
 			const displayText = item.displayText || item.insertText;
 			const insertText = item.insertText;

@@ -6,6 +6,11 @@ export interface ConfirmationModalOptions {
 	confirmText?: string;
 	cancelText?: string;
 	isDestructive?: boolean;
+	defaultToConfirm?: boolean;
+	/** Optional third button text (e.g., "Cancel" to go back) */
+	thirdButtonText?: string;
+	/** Callback when third button is clicked */
+	onThirdButton?: () => void;
 }
 
 /**
@@ -46,6 +51,18 @@ export class ConfirmationModal extends Modal {
 		buttonContainer.style.justifyContent = "flex-end";
 		buttonContainer.style.marginTop = "20px";
 
+		// Optional third button (e.g., "Cancel" to go back to editing)
+		let thirdButton: HTMLButtonElement | null = null;
+		if (this.options.thirdButtonText) {
+			thirdButton = buttonContainer.createEl("button", { text: this.options.thirdButtonText });
+			thirdButton.addEventListener("click", () => {
+				if (this.options.onThirdButton) {
+					this.options.onThirdButton();
+				}
+				this.close();
+			});
+		}
+
 		const cancelButton = buttonContainer.createEl("button", { text: this.options.cancelText });
 		cancelButton.addEventListener("click", () => {
 			this.resolve(false);
@@ -67,8 +84,16 @@ export class ConfirmationModal extends Modal {
 			this.close();
 		});
 
-		// Focus the cancel button by default for safety
-		cancelButton.focus();
+		// Focus the appropriate button based on defaultToConfirm option
+		// Use setTimeout to ensure the DOM is fully rendered before focusing
+		setTimeout(() => {
+			if (this.options.defaultToConfirm) {
+				confirmButton.focus();
+			} else {
+				// Focus the cancel button by default for safety
+				cancelButton.focus();
+			}
+		}, 0);
 	}
 
 	onClose() {

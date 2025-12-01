@@ -29,8 +29,8 @@ import {
 	renderProjectLinks,
 	type LinkServices,
 } from "../ui/renderers/linkRenderer";
-import { TaskSelectorModal } from "./TaskSelectorModal";
-import { generateLink, generateLinkWithDisplay } from "../utils/linkUtils";
+import { openTaskSelector } from "./TaskSelectorWithCreateModal";
+import { generateLink, generateLinkWithDisplay, parseLinkToPath } from "../utils/linkUtils";
 import { EmbeddableMarkdownEditor } from "../editor/EmbeddableMarkdownEditor";
 
 interface DependencyItem {
@@ -369,11 +369,10 @@ export abstract class TaskModal extends Modal {
 				return;
 			}
 
-			const modal = new TaskSelectorModal(this.app, this.plugin, candidates, (task) => {
+			openTaskSelector(this.plugin, candidates, (task) => {
 				if (!task) return;
 				onSelect(task);
 			});
-			modal.open();
 		} catch (error) {
 			console.error("Failed to open task selector for dependencies:", error);
 			new Notice(this.t("contextMenus.task.dependencies.notices.updateFailed"));
@@ -1646,10 +1645,7 @@ export abstract class TaskModal extends Modal {
 	}
 
 	protected updateProjectsFromFiles(): void {
-		// Convert selected files to markdown links using generateMarkdownLink
-		const currentFile = this.app.workspace.getActiveFile();
-		const sourcePath = currentFile?.path || "";
-
+		// Update the projects string from selected items
 		this.projects = this.selectedProjectItems.map((item) => item.link).join(", ");
 	}
 
@@ -1669,6 +1665,9 @@ export abstract class TaskModal extends Modal {
 		// This handles both old plain string projects and new [[link]] format
 		this.selectedProjectItems = [];
 
+		// Use the task's path as the source for resolving relative links
+		const sourcePath = this.getCurrentTaskPath() || "";
+
 		for (const projectString of projects) {
 			// Skip null, undefined, or empty strings
 			if (
@@ -1683,7 +1682,7 @@ export abstract class TaskModal extends Modal {
 			const linkMatch = projectString.match(/^\[\[([^\]]+)\]\]$/);
 			if (linkMatch) {
 				const linkPath = linkMatch[1];
-				const file = this.resolveLink(linkPath, "");
+				const file = this.resolveLink(linkPath, sourcePath);
 				if (file) {
 					// Resolved link
 					this.selectedProjectItems.push({
@@ -1701,24 +1700,47 @@ export abstract class TaskModal extends Modal {
 					});
 				}
 			} else {
-				// For backwards compatibility, try to find a file with this name
-				const files = this.getMarkdownFiles();
-				const matchingFile = files.find(
-					(f) => f.basename === projectString || f.name === projectString + ".md"
-				);
-				if (matchingFile) {
-					this.selectedProjectItems.push({
-						file: matchingFile,
-						name: matchingFile.basename,
-						link: `[[${matchingFile.basename}]]`,
-					});
+				// Check if it's a markdown link format [text](path)
+				const markdownMatch = projectString.match(/^\[([^\]]*)\]\(([^)]+)\)$/);
+				if (markdownMatch) {
+					const linkPath = parseLinkToPath(projectString);
+					const file = this.resolveLink(linkPath, sourcePath);
+					if (file) {
+						// Resolved markdown link
+						this.selectedProjectItems.push({
+							file,
+							name: file.basename,
+							link: projectString,
+						});
+					} else {
+						// Unresolved markdown link
+						const displayName = markdownMatch[1] || linkPath;
+						this.selectedProjectItems.push({
+							name: displayName,
+							link: projectString,
+							unresolved: true,
+						});
+					}
 				} else {
-					// Plain text that doesn't resolve
-					this.selectedProjectItems.push({
-						name: projectString,
-						link: `[[${projectString}]]`,
-						unresolved: true,
-					});
+					// For backwards compatibility, try to find a file with this name
+					const files = this.getMarkdownFiles();
+					const matchingFile = files.find(
+						(f) => f.basename === projectString || f.name === projectString + ".md"
+					);
+					if (matchingFile) {
+						this.selectedProjectItems.push({
+							file: matchingFile,
+							name: matchingFile.basename,
+							link: `[[${matchingFile.basename}]]`,
+						});
+					} else {
+						// Plain text - preserve as-is
+						this.selectedProjectItems.push({
+							name: projectString,
+							link: projectString,
+							unresolved: true,
+						});
+					}
 				}
 			}
 		}
@@ -1804,19 +1826,13 @@ export abstract class TaskModal extends Modal {
 				return;
 			}
 
-			const selector = new TaskSelectorModal(
-				this.app,
-				this.plugin,
-				candidates,
-				async (subtask) => {
-					if (!subtask) return;
-					const file = this.app.vault.getAbstractFileByPath(subtask.path);
-					if (file) {
-						this.addSubtask(file);
-					}
+			openTaskSelector(this.plugin, candidates, async (subtask) => {
+				if (!subtask) return;
+				const file = this.app.vault.getAbstractFileByPath(subtask.path);
+				if (file) {
+					this.addSubtask(file);
 				}
-			);
-			selector.open();
+			});
 		} catch (error) {
 			console.error("Failed to open subtask selector:", error);
 			new Notice(this.t("modals.task.organization.notices.subtaskSelectFailed"));

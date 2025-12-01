@@ -229,6 +229,11 @@ export const fr: TranslationTree = {
 					initialScrollTime: "Heure de défilement initial",
 					initialScrollTimePlaceholder: "HH:mm:ss (ex. 08:00:00)",
 					minimumEventHeight: "Hauteur minimale de l'événement (px)",
+					slotEventOverlap: "Autoriser le chevauchement des événements",
+					enableSearch: "Activer la zone de recherche",
+					eventMaxStack: "Max. événements empilés (vue semaine/jour, 0 = illimité)",
+					dayMaxEvents: "Max. événements par jour (vue mois, 0 = automatique)",
+					dayMaxEventRows: "Max. lignes d'événements par jour (vue mois, 0 = illimité)",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Propriété de date de début",
@@ -804,6 +809,7 @@ export const fr: TranslationTree = {
 					value: "Valeur : L'identifiant interne stocké dans vos fichiers de tâches (ex. \"in-progress\")",
 					label: "Label : Le nom affiché dans l'interface (ex. \"En cours\")",
 					color: "Couleur : Couleur d'indicateur visuel pour les points et badges de statut",
+					icon: "Icône : Nom d'icône Lucide optionnel à afficher à la place du point coloré (ex. \"check\", \"circle\", \"clock\"). Parcourir les icônes sur lucide.dev",
 					completed: "Terminé : Quand coché, les tâches avec ce statut sont considérées comme finies et peuvent être filtrées différemment",
 					autoArchive: "Archivage auto : Quand activé, les tâches seront automatiquement archivées après le délai spécifié (1-1440 minutes)",
 					orderNote: "L'ordre ci-dessous détermine la séquence lors du passage d'un statut à l'autre en cliquant sur les badges de statut des tâches.",
@@ -820,6 +826,7 @@ export const fr: TranslationTree = {
 					value: "Valeur :",
 					label: "Label :",
 					color: "Couleur :",
+					icon: "Icône :",
 					completed: "Terminé :",
 					autoArchive: "Archivage auto :",
 					delayMinutes: "Délai (minutes) :",
@@ -827,6 +834,7 @@ export const fr: TranslationTree = {
 				placeholders: {
 					value: "en-cours",
 					label: "En cours",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "Terminé",
@@ -1061,6 +1069,7 @@ export const fr: TranslationTree = {
 					name: "Locale du calendrier",
 					description: "Locale du calendrier pour le formatage des dates et le système calendaire (ex. \"en\", \"fa\" pour le Farsi/Persan, \"de\" pour l'Allemand). Laisser vide pour détecter automatiquement depuis le navigateur.",
 					placeholder: "Détection automatique",
+					invalidLocale: "Locale invalide. Veuillez entrer un code de langue valide (ex. 'fr', 'en', 'de-DE').",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const fr: TranslationTree = {
 					description: "Permettre l'utilisation des vues TaskNotes dans le plugin Obsidian Bases. Le plugin Bases doit être activé pour que cela fonctionne.",
 				},
 				viewCommands: {
-					header: "Commandes de vue",
-					description: "Configurez quels fichiers .base sont ouverts par les commandes de vue. Ces commandes vous permettent de continuer à utiliser des raccourcis familiers tout en travaillant avec des fichiers Bases.",
+					header: "Vues et fichiers base",
+					description: "TaskNotes utilise les fichiers Obsidian Bases (.base) pour ses vues. Ces fichiers sont générés automatiquement au démarrage s'ils n'existent pas, configurés avec vos paramètres actuels (identification des tâches, correspondance des champs, statuts, etc.).",
+					descriptionRegen: "Les fichiers base ne sont pas mis à jour automatiquement lorsque vous modifiez les paramètres. Pour appliquer les nouveaux paramètres, supprimez les fichiers .base existants et redémarrez Obsidian, utilisez « Créer les fichiers » ci-dessous, ou modifiez-les manuellement.",
+					docsLink: "Voir la documentation pour les formules disponibles et les options de personnalisation",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Ouvrir la vue mini calendrier",
 						kanban: "Ouvrir la vue kanban",
@@ -1717,6 +1729,7 @@ export const fr: TranslationTree = {
 		viewReleaseNotes: "Voir les notes de version",
 		startTimeTrackingWithSelector: "Démarrer le suivi du temps (sélectionner une tâche)",
 		editTimeEntries: "Modifier les entrées de temps (sélectionner une tâche)",
+		createOrOpenTask: "Créer ou ouvrir une tâche",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const fr: TranslationTree = {
 			tagsPlaceholder: "etiquette1, etiquette2",
 			timeEstimateLabel: "Estimation (minutes)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Modifications non enregistrées",
+				message: "Vous avez des modifications non enregistrées. Voulez-vous les enregistrer ?",
+				save: "Enregistrer les modifications",
+				discard: "Ignorer les modifications",
+				cancel: "Continuer l'édition",
+			},
 			dependencies: {
 				blockedBy: "Bloqué par",
 				blocking: "Bloquant",
@@ -1974,6 +1994,20 @@ export const fr: TranslationTree = {
 			dueDate: {
 				overdue: "Échéance : {date} (en retard)",
 				today: "Échéance : Aujourd'hui",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "Créer ou ouvrir une tâche",
+			placeholder: "Rechercher des tâches ou taper pour créer...",
+			instructions: {
+				create: "pour créer une nouvelle tâche",
+			},
+			footer: {
+				createLabel: " pour créer : ",
+			},
+			notices: {
+				emptyQuery: "Veuillez entrer une description de tâche",
+				invalidTitle: "Impossible de reconnaître un titre de tâche valide",
 			},
 		},
 		taskCreation: {

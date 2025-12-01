@@ -5,6 +5,9 @@ import { PropertyMappingService } from "./PropertyMappingService";
 import { TaskInfo, EVENT_TASK_UPDATED } from "../types";
 import { convertInternalToUserProperties } from "../utils/propertyMapping";
 import { DEFAULT_INTERNAL_VISIBLE_PROPERTIES } from "../settings/defaults";
+import { SearchBox } from "./components/SearchBox";
+import { TaskSearchFilter } from "./TaskSearchFilter";
+import { BatchContextMenu } from "../components/BatchContextMenu";
 
 /**
  * Abstract base class for all TaskNotes Bases views.
@@ -24,6 +27,16 @@ export abstract class BasesViewBase extends Component {
 	protected rootElement: HTMLElement | null = null;
 	protected taskUpdateListener: any = null;
 	protected updateDebounceTimer: number | null = null;
+
+	// Search functionality (opt-in via enableSearch flag)
+	protected enableSearch = false;
+	protected searchBox: SearchBox | null = null;
+	protected searchFilter: TaskSearchFilter | null = null;
+	protected currentSearchTerm = "";
+
+	// Selection mode state
+	protected selectionModeCleanup: (() => void) | null = null;
+	protected selectionIndicatorEl: HTMLElement | null = null;
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		// Call Component constructor
@@ -49,6 +62,7 @@ export abstract class BasesViewBase extends Component {
 	onload(): void {
 		this.setupContainer();
 		this.setupTaskUpdateListener();
+		this.setupSelectionHandling();
 		this.render();
 	}
 
@@ -311,7 +325,9 @@ export abstract class BasesViewBase extends Component {
 		}
 
 		// Open TaskNotes creation modal
-		const modal = new TaskCreationModal(this.app, this.plugin, {
+		// Use this.app if available (set by Bases), otherwise fall back to plugin.app
+		const app = this.app || this.plugin.app;
+		const modal = new TaskCreationModal(app, this.plugin, {
 			prePopulatedValues: taskCreationData,
 			onTaskCreated: (task: TaskInfo) => {
 				// Refresh the view after task creation so it appears immediately
@@ -342,6 +358,383 @@ export abstract class BasesViewBase extends Component {
 		}
 
 		return visibleProperties;
+	}
+
+	/**
+	 * Initialize search functionality for this view.
+	 * Call this from render() in subclasses that want search.
+	 * Requires enableSearch to be true and will only create the UI once.
+	 */
+	protected setupSearch(container: HTMLElement): void {
+		// Idempotency: if search UI is already created, restore value and return
+		if (this.searchBox) {
+			// Restore search term if it was cleared during re-render
+			if (this.currentSearchTerm && this.searchBox.getValue() !== this.currentSearchTerm) {
+				this.searchBox.setValue(this.currentSearchTerm);
+			}
+			return;
+		}
+		if (!this.enableSearch) {
+			return;
+		}
+
+		// Create search container
+		const searchContainer = document.createElement("div");
+		searchContainer.className = "tn-search-container";
+
+		// Insert search container at the top of the container so it appears above
+		// the main items/content (e.g., the task list). This keeps the search box
+		// visible while the list itself can scroll independently.
+		if (container.firstChild) {
+			container.insertBefore(searchContainer, container.firstChild);
+		} else {
+			container.appendChild(searchContainer);
+		}
+
+		// Initialize search filter with visible properties (if available)
+		// Config might not be available yet during initial setup
+		let visibleProperties: string[] = [];
+		try {
+			if (this.config) {
+				visibleProperties = this.getVisibleProperties();
+			}
+		} catch (e) {
+			console.debug(`[${this.type}] Could not get visible properties during search setup:`, e);
+		}
+		this.searchFilter = new TaskSearchFilter(visibleProperties);
+
+		// Initialize search box
+		this.searchBox = new SearchBox(
+			searchContainer,
+			(term) => this.handleSearch(term),
+			300 // 300ms debounce
+		);
+		this.searchBox.render();
+
+		// Restore search term if view is being re-initialized with existing search
+		if (this.currentSearchTerm) {
+			this.searchBox.setValue(this.currentSearchTerm);
+		}
+
+		// Register cleanup using Component lifecycle
+		this.register(() => {
+			if (this.searchBox) {
+				this.searchBox.destroy();
+				this.searchBox = null;
+			}
+			this.searchFilter = null;
+			this.currentSearchTerm = "";
+		});
+	}
+
+	/**
+	 * Handle search term changes.
+	 * Subclasses can override for custom behavior.
+	 * Includes performance monitoring for search operations.
+	 */
+	protected handleSearch(term: string): void {
+		const startTime = performance.now();
+		this.currentSearchTerm = term;
+
+		// Re-render with filtered tasks
+		this.render();
+
+		const filterTime = performance.now() - startTime;
+
+		// Log slow searches for performance monitoring
+		if (filterTime > 200) {
+			console.warn(
+				`[${this.type}] Slow search: ${filterTime.toFixed(2)}ms for search term "${term}"`
+			);
+		}
+	}
+
+	/**
+	 * Apply search filter to tasks.
+	 * Returns filtered tasks or original if no search term.
+	 */
+	protected applySearchFilter(tasks: TaskInfo[]): TaskInfo[] {
+		if (!this.searchFilter || !this.currentSearchTerm) {
+			return tasks;
+		}
+
+		const startTime = performance.now();
+		const filtered = this.searchFilter.filterTasks(tasks, this.currentSearchTerm);
+		const filterTime = performance.now() - startTime;
+
+		// Log filter performance for monitoring
+		if (filterTime > 100) {
+			console.warn(
+				`[${this.type}] Filter operation took ${filterTime.toFixed(2)}ms for ${tasks.length} tasks`
+			);
+		}
+
+		return filtered;
+	}
+
+	/**
+	 * Check if we're currently filtering with no results.
+	 * Returns true if search is active and produced no matches.
+	 */
+	protected isSearchWithNoResults(filteredTasks: TaskInfo[], originalCount: number): boolean {
+		return this.currentSearchTerm.length > 0 && filteredTasks.length === 0 && originalCount > 0;
+	}
+
+	/**
+	 * Render "no results" message for search.
+	 * Call this when search produces no matches.
+	 */
+	protected renderSearchNoResults(container: HTMLElement): void {
+		const noResultsEl = document.createElement("div");
+		noResultsEl.className = "tn-search-no-results";
+
+		const textEl = document.createElement("div");
+		textEl.className = "tn-search-no-results__text";
+		textEl.textContent = `No tasks match "${this.currentSearchTerm}"`;
+
+		const hintEl = document.createElement("div");
+		hintEl.className = "tn-search-no-results__hint";
+		hintEl.textContent = "Try a different search term or clear the search";
+
+		noResultsEl.appendChild(textEl);
+		noResultsEl.appendChild(hintEl);
+		container.appendChild(noResultsEl);
+	}
+
+	// =====================
+	// Selection Mode Methods
+	// =====================
+
+	/**
+	 * Setup selection mode handling (keyboard shortcuts and listeners).
+	 */
+	protected setupSelectionHandling(): void {
+		if (!this.rootElement) return;
+
+		const selectionService = this.plugin.taskSelectionService;
+		if (!selectionService) return;
+
+		// Keyboard event handler for selection mode
+		const handleKeyDown = (e: KeyboardEvent) => {
+			// Escape exits selection mode and clears selection
+			if (e.key === "Escape" && selectionService.isSelectionModeActive()) {
+				selectionService.exitSelectionMode(true);
+				this.updateSelectionModeUI(false);
+			}
+
+			// Ctrl/Cmd + A to select all visible tasks (only when in selection mode)
+			if ((e.ctrlKey || e.metaKey) && e.key === "a" && selectionService.isSelectionModeActive()) {
+				e.preventDefault();
+				const visiblePaths = this.getVisibleTaskPaths();
+				selectionService.selectAll(visiblePaths);
+				this.updateSelectionVisuals();
+			}
+		};
+
+		// Add listener to the root element
+		this.rootElement.addEventListener("keydown", handleKeyDown);
+
+		// Listen for selection changes to update UI
+		const unsubscribeSelection = selectionService.onSelectionChange((paths) => {
+			this.updateSelectionVisuals();
+			this.updateSelectionIndicator(paths.length);
+		});
+
+		const unsubscribeMode = selectionService.onSelectionModeChange((active) => {
+			this.updateSelectionModeUI(active);
+		});
+
+		// Register cleanup
+		this.register(() => {
+			this.rootElement?.removeEventListener("keydown", handleKeyDown);
+			unsubscribeSelection();
+			unsubscribeMode();
+		});
+	}
+
+	/**
+	 * Update UI to reflect selection mode state.
+	 */
+	protected updateSelectionModeUI(active: boolean): void {
+		if (!this.rootElement) return;
+
+		if (active) {
+			this.rootElement.classList.add("tn-selection-mode");
+			this.rootElement.setAttribute("data-selection-mode", "true");
+		} else {
+			this.rootElement.classList.remove("tn-selection-mode");
+			this.rootElement.removeAttribute("data-selection-mode");
+			// Also clear visual selection indicators
+			this.clearSelectionVisuals();
+		}
+	}
+
+	/**
+	 * Update visual selection state on task cards.
+	 */
+	protected updateSelectionVisuals(): void {
+		if (!this.rootElement) return;
+
+		const selectionService = this.plugin.taskSelectionService;
+		if (!selectionService) return;
+
+		// Find all task cards and update their selection state
+		const primaryPath = selectionService.getPrimarySelectedPath();
+
+		const cards = this.rootElement.querySelectorAll<HTMLElement>(".task-card");
+		for (const card of cards) {
+			const path = card.dataset.taskPath;
+			if (path) {
+				if (selectionService.isSelected(path)) {
+					card.classList.add("task-card--selected");
+					if (path === primaryPath) {
+						card.classList.add("task-card--selected-primary");
+					} else {
+						card.classList.remove("task-card--selected-primary");
+					}
+				} else {
+					card.classList.remove("task-card--selected");
+					card.classList.remove("task-card--selected-primary");
+				}
+			}
+		}
+
+		// Also update kanban card wrappers (for visual consistency)
+		const cardWrappers = this.rootElement.querySelectorAll<HTMLElement>(".kanban-view__card-wrapper");
+		for (const wrapper of cardWrappers) {
+			const path = wrapper.dataset.taskPath;
+			if (path) {
+				if (selectionService.isSelected(path)) {
+					wrapper.classList.add("kanban-view__card-wrapper--selected");
+					if (path === primaryPath) {
+						wrapper.classList.add("kanban-view__card-wrapper--selected-primary");
+					} else {
+						wrapper.classList.remove("kanban-view__card-wrapper--selected-primary");
+					}
+				} else {
+					wrapper.classList.remove("kanban-view__card-wrapper--selected");
+					wrapper.classList.remove("kanban-view__card-wrapper--selected-primary");
+				}
+			}
+		}
+	}
+
+	/**
+	 * Clear all visual selection indicators.
+	 */
+	protected clearSelectionVisuals(): void {
+		if (!this.rootElement) return;
+
+		const cards = this.rootElement.querySelectorAll<HTMLElement>(".task-card--selected");
+		for (const card of cards) {
+			card.classList.remove("task-card--selected");
+			card.classList.remove("task-card--selected-primary");
+		}
+
+		const cardWrappers = this.rootElement.querySelectorAll<HTMLElement>(".kanban-view__card-wrapper--selected");
+		for (const wrapper of cardWrappers) {
+			wrapper.classList.remove("kanban-view__card-wrapper--selected");
+			wrapper.classList.remove("kanban-view__card-wrapper--selected-primary");
+		}
+	}
+
+	/**
+	 * Update selection count indicator.
+	 */
+	protected updateSelectionIndicator(count: number): void {
+		if (!this.rootElement) return;
+
+		if (count > 0) {
+			// Create or update indicator
+			if (!this.selectionIndicatorEl) {
+				this.selectionIndicatorEl = document.createElement("div");
+				this.selectionIndicatorEl.className = "tn-selection-indicator";
+				this.selectionIndicatorEl.addEventListener("click", () => {
+					this.plugin.taskSelectionService?.clearSelection();
+					this.plugin.taskSelectionService?.exitSelectionMode();
+				});
+				this.rootElement.appendChild(this.selectionIndicatorEl);
+			}
+			this.selectionIndicatorEl.textContent = `${count} selected`;
+			this.selectionIndicatorEl.style.display = "block";
+		} else if (this.selectionIndicatorEl) {
+			this.selectionIndicatorEl.style.display = "none";
+		}
+	}
+
+	/**
+	 * Handle task card click in selection mode.
+	 * Returns true if the click was handled as a selection action.
+	 */
+	protected handleSelectionClick(event: MouseEvent, taskPath: string): boolean {
+		const selectionService = this.plugin.taskSelectionService;
+		if (!selectionService) return false;
+
+		// If not in selection mode and no modifier keys, don't handle
+		if (!selectionService.isSelectionModeActive() && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+			return false;
+		}
+
+		// Enter selection mode if shift is pressed
+		if (event.shiftKey && !selectionService.isSelectionModeActive()) {
+			selectionService.enterSelectionMode();
+		}
+
+		// Handle different click modes
+		if (event.shiftKey) {
+			// Range selection
+			const visiblePaths = this.getVisibleTaskPaths();
+			selectionService.selectRange(taskPath, visiblePaths);
+		} else if (event.ctrlKey || event.metaKey) {
+			// Toggle individual selection
+			selectionService.toggleSelection(taskPath);
+		} else if (selectionService.isSelectionModeActive()) {
+			// In selection mode, regular click toggles selection
+			selectionService.toggleSelection(taskPath);
+		}
+
+		this.updateSelectionVisuals();
+		return true;
+	}
+
+	/**
+	 * Show batch context menu for selected tasks.
+	 */
+	protected showBatchContextMenu(event: MouseEvent): void {
+		const selectionService = this.plugin.taskSelectionService;
+		if (!selectionService) return;
+
+		const selectedPaths = selectionService.getSelectedPaths();
+		if (selectedPaths.length === 0) return;
+
+		const menu = new BatchContextMenu({
+			plugin: this.plugin,
+			selectedPaths,
+			onUpdate: () => {
+				this.render();
+			},
+		});
+
+		menu.show(event);
+	}
+
+	/**
+	 * Get paths of all currently visible tasks.
+	 * Subclasses should override this to return the correct paths based on their rendering.
+	 */
+	protected getVisibleTaskPaths(): string[] {
+		// Default implementation: extract from DOM
+		if (!this.rootElement) return [];
+
+		const cards = this.rootElement.querySelectorAll<HTMLElement>(".task-card[data-task-path]");
+		const paths: string[] = [];
+		for (const card of cards) {
+			const path = card.dataset.taskPath;
+			if (path) {
+				paths.push(path);
+			}
+		}
+		return paths;
 	}
 
 	// Abstract methods that subclasses must implement

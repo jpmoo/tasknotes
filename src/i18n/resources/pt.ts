@@ -228,7 +228,12 @@ export const pt: TranslationTree = {
 					timeFormat24: "24 horas",
 					initialScrollTime: "Hora inicial de rolagem",
 					initialScrollTimePlaceholder: "HH:mm:ss (ex: 08:00:00)",
-					minimumEventHeight: "Altura mínima do evento (px)"
+					minimumEventHeight: "Altura mínima do evento (px)",
+					slotEventOverlap: "Permitir sobreposição de eventos",
+					enableSearch: "Habilitar caixa de pesquisa",
+					eventMaxStack: "Máx. eventos empilhados (vista semana/dia, 0 = ilimitado)",
+					dayMaxEvents: "Máx. eventos por dia (vista mês, 0 = automático)",
+					dayMaxEventRows: "Máx. linhas de eventos por dia (vista mês, 0 = ilimitado)"
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Propriedade da data de início",
@@ -807,6 +812,7 @@ export const pt: TranslationTree = {
 					value: 'Valor: O identificador interno armazenado em seus arquivos de tarefa (ex: "em-progresso")',
 					label: 'Rótulo: O nome de exibição mostrado na interface (ex: "Em Progresso")',
 					color: "Cor: Cor do indicador visual para o ponto de status e emblemas",
+					icon: 'Ícone: Nome de ícone Lucide opcional para exibir em vez do ponto colorido (ex: "check", "circle", "clock"). Navegue pelos ícones em lucide.dev',
 					completed: "Concluído: Quando marcado, tarefas com este status são consideradas finalizadas e podem ser filtradas de forma diferente",
 					autoArchive: "Arquivar automaticamente: Quando ativado, as tarefas serão automaticamente arquivadas após o atraso especificado (1-1440 minutos)",
 					orderNote: "A ordem abaixo determina a sequência ao alternar entre os status clicando nos emblemas de status da tarefa."
@@ -823,13 +829,15 @@ export const pt: TranslationTree = {
 					value: "Valor:",
 					label: "Rótulo:",
 					color: "Cor:",
+					icon: "Ícone:",
 					completed: "Concluído:",
 					autoArchive: "Arquivar auto.:",
 					delayMinutes: "Atraso (minutos):"
 				},
 				placeholders: {
 					value: "em-progresso",
-					label: "Em Progresso"
+					label: "Em Progresso",
+					icon: "check, circle, clock"
 				},
 				badges: {
 					completed: "Concluído"
@@ -1063,7 +1071,8 @@ export const pt: TranslationTree = {
 				calendarLocale: {
 					name: "Localidade do calendário",
 					description: 'Localidade do calendário para formatação de data e sistema de calendário (ex: "pt-br", "en", "fa" para Farsi/Persa, "de" para Alemão). Deixe em branco para detectar automaticamente do navegador.',
-					placeholder: "Autodetectar"
+					placeholder: "Autodetectar",
+					invalidLocale: "Localidade inválida. Por favor, insira um código de idioma válido (ex: 'pt-BR', 'en', 'fr-FR')."
 				}
 			},
 			defaultEventVisibility: {
@@ -1272,8 +1281,11 @@ export const pt: TranslationTree = {
 					description: "Permitir que as visualizações do TaskNotes sejam usadas dentro do plugin Obsidian Bases. O plugin Bases deve estar ativado para que isso funcione."
 				},
 				viewCommands: {
-					header: "Comandos de visualização",
-					description: "Configure quais arquivos .base são abertos pelos comandos de visualização. Esses comandos permitem que você continue usando atalhos familiares enquanto trabalha com arquivos de Bases.",
+					header: "Visualizações e arquivos base",
+					description: "O TaskNotes usa arquivos do Obsidian Bases (.base) para suas visualizações. Esses arquivos são gerados automaticamente na inicialização se não existirem, configurados com suas definições atuais (identificação de tarefas, mapeamento de campos, status, etc.).",
+					descriptionRegen: "Os arquivos base não são atualizados automaticamente quando você altera as configurações. Para aplicar novas configurações, exclua os arquivos .base existentes e reinicie o Obsidian, use \"Criar arquivos\" abaixo ou edite-os manualmente.",
+					docsLink: "Ver documentação para fórmulas disponíveis e opções de personalização",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Abrir visualização de mini calendário",
 						kanban: "Abrir visualização kanban",
@@ -1724,7 +1736,8 @@ export const pt: TranslationTree = {
 		exportAllTasksIcs: "Exportar todas as tarefas como arquivo ICS",
 		viewReleaseNotes: "Ver notas de lançamento",
 		startTimeTrackingWithSelector: "Iniciar registro de tempo (selecionar tarefa)",
-		editTimeEntries: "Editar registros de tempo (selecionar tarefa)"
+		editTimeEntries: "Editar registros de tempo (selecionar tarefa)",
+		createOrOpenTask: "Criar ou abrir tarefa"
 	},
 	modals: {
 		deviceCode: {
@@ -1895,6 +1908,13 @@ export const pt: TranslationTree = {
 			tagsPlaceholder: "tag1, tag2",
 			timeEstimateLabel: "Estimativa de tempo (minutos)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Alterações não salvas",
+				message: "Você tem alterações não salvas. Deseja salvá-las?",
+				save: "Salvar alterações",
+				discard: "Descartar alterações",
+				cancel: "Continuar editando"
+			},
 			dependencies: {
 				blockedBy: "Bloqueada por",
 				blocking: "Bloqueando",
@@ -1982,6 +2002,20 @@ export const pt: TranslationTree = {
 			dueDate: {
 				overdue: "Vencimento: {date} (atrasada)",
 				today: "Vencimento: Hoje"
+			}
+		},
+		taskSelectorWithCreate: {
+			title: "Criar ou abrir tarefa",
+			placeholder: "Pesquisar tarefas ou digitar para criar nova...",
+			instructions: {
+				create: "para criar nova tarefa"
+			},
+			footer: {
+				createLabel: " para criar: "
+			},
+			notices: {
+				emptyQuery: "Por favor, insira uma descrição da tarefa",
+				invalidTitle: "Não foi possível reconhecer um título de tarefa válido"
 			}
 		},
 		taskCreation: {

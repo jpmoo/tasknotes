@@ -62,9 +62,6 @@ export class TaskLinkWidget extends WidgetType {
 		// Add card to wrapper
 		wrapper.appendChild(card);
 
-		// Add drag functionality to the card
-		this.addDragHandlers(card);
-
 		// Store original text for reference
 		card.dataset.originalText = this.originalText;
 
@@ -79,14 +76,6 @@ export class TaskLinkWidget extends WidgetType {
 		});
 
 		return wrapper;
-	}
-
-	/**
-	 * Add drag handlers to task link widget for dragging to calendar
-	 */
-	private addDragHandlers(container: HTMLElement): void {
-		// Use the centralized drag drop manager for FullCalendar compatibility
-		this.plugin.dragDropManager.makeTaskCardDraggable(container, this.taskInfo.path);
 	}
 
 	/**
@@ -112,9 +101,15 @@ export class TaskLinkWidget extends WidgetType {
 	}
 
 	/**
-	 * Indicate this widget should be treated as atomic for editing purposes
+	 * Ignore mouse events on the widget to prevent cursor movement
+	 * when clicking interactive elements like status dot
 	 */
-	ignoreEvent(): boolean {
+	ignoreEvent(event: Event): boolean {
+		// Ignore mouse events to prevent cursor from moving into widget
+		// This keeps the widget rendered while interacting with it
+		if (event.type === "mousedown" || event.type === "click") {
+			return true;
+		}
 		return false;
 	}
 

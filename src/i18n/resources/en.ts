@@ -231,6 +231,11 @@ export const en: TranslationTree = {
 					initialScrollTime: "Initial scroll time",
 					initialScrollTimePlaceholder: "HH:mm:ss (e.g., 08:00:00)",
 					minimumEventHeight: "Minimum event height (px)",
+					slotEventOverlap: "Allow events to overlap",
+					enableSearch: "Enable search box",
+					eventMaxStack: "Max stacked events (week/day view, 0 = unlimited)",
+					dayMaxEvents: "Max events per day (month view, 0 = auto)",
+					dayMaxEventRows: "Max event rows per day (month view, 0 = unlimited)",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Start date property",
@@ -827,6 +832,7 @@ export const en: TranslationTree = {
 					value: 'Value: The internal identifier stored in your task files (e.g., "in-progress")',
 					label: 'Label: The display name shown in the interface (e.g., "In Progress")',
 					color: "Color: Visual indicator color for the status dot and badges",
+					icon: 'Icon: Optional Lucide icon name to display instead of colored dot (e.g., "check", "circle", "clock"). Browse icons at lucide.dev',
 					completed:
 						"Completed: When checked, tasks with this status are considered finished and may be filtered differently",
 					autoArchive:
@@ -847,6 +853,7 @@ export const en: TranslationTree = {
 					value: "Value:",
 					label: "Label:",
 					color: "Color:",
+					icon: "Icon:",
 					completed: "Completed:",
 					autoArchive: "Auto-archive:",
 					delayMinutes: "Delay (minutes):",
@@ -854,6 +861,7 @@ export const en: TranslationTree = {
 				placeholders: {
 					value: "in-progress",
 					label: "In Progress",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "Completed",
@@ -1094,6 +1102,7 @@ export const en: TranslationTree = {
 					description:
 						'Calendar locale for date formatting and calendar system (e.g., "en", "fa" for Farsi/Persian, "de" for German). Leave empty to auto-detect from browser.',
 					placeholder: "Auto-detect",
+					invalidLocale: "Invalid locale. Please enter a valid language tag (e.g., 'en', 'de', 'fr-FR').",
 				},
 			},
 			defaultEventVisibility: {
@@ -1307,8 +1316,11 @@ export const en: TranslationTree = {
 						"Enable TaskNotes views to be used within Obsidian Bases plugin. Bases plugin must be enabled for this to work.",
 				},
 				viewCommands: {
-					header: "View commands",
-					description: "Configure which .base files are opened by view commands. These commands let you continue using familiar shortcuts while working with Bases files.",
+					header: "Views & base files",
+					description: "TaskNotes uses Obsidian Bases files (.base) to power its views. These files are generated automatically on startup if they don't exist, configured with your current settings (task identification, field mappings, statuses, etc.).",
+					descriptionRegen: "Base files are not automatically updated when you change settings. To apply new settings, delete the existing .base files and restart Obsidian, or use \"Create files\" below, or edit them manually.",
+					docsLink: "View documentation for available formulas and customization options",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Open mini calendar view",
 						kanban: "Open kanban view",
@@ -1775,6 +1787,7 @@ export const en: TranslationTree = {
 		viewReleaseNotes: "View release notes",
 		startTimeTrackingWithSelector: "Start time tracking (select task)",
 		editTimeEntries: "Edit time entries (select task)",
+		createOrOpenTask: "Create or open task",
 	},
 	modals: {
 		deviceCode: {
@@ -1945,6 +1958,13 @@ export const en: TranslationTree = {
 			tagsPlaceholder: "tag1, tag2",
 			timeEstimateLabel: "Time estimate (minutes)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Unsaved Changes",
+				message: "You have unsaved changes. Do you want to save them?",
+				save: "Save Changes",
+				discard: "Discard Changes",
+				cancel: "Keep Editing",
+			},
 			dependencies: {
 				blockedBy: "Blocked by",
 				blocking: "Blocking",
@@ -2032,6 +2052,20 @@ export const en: TranslationTree = {
 			dueDate: {
 				overdue: "Due: {date} (overdue)",
 				today: "Due: Today",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "Create or open task",
+			placeholder: "Search tasks or type to create new...",
+			instructions: {
+				create: "to create new task",
+			},
+			footer: {
+				createLabel: " to create: ",
+			},
+			notices: {
+				emptyQuery: "Please enter a task description",
+				invalidTitle: "Could not parse a valid task title",
 			},
 		},
 		taskCreation: {

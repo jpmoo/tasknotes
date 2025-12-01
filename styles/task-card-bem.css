@@ -22,16 +22,14 @@
     box-shadow: none;
 
     /* Interactions & Accessibility - Smooth transitions */
-    cursor: var(--cursor);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--tn-transition-fast);
     outline: none;
     role: listitem;
     tabindex: 0;
 }
 
 .tasknotes-plugin .task-card:hover {
-    background-color: var(--tn-interactive-hover);
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--tn-shadow-color, black) 5%, transparent);
+    background-color: var(--background-modifier-hover);
 }
 
 /* Prevent parent hover when hovering over subtasks or blocking tasks */
@@ -41,10 +39,9 @@
 }
 
 .tasknotes-plugin .task-card:focus {
-    background-color: var(--tn-interactive-hover);
-    outline: 2px solid color-mix(in srgb, var(--tn-interactive-accent) 30%, transparent);
-    outline-offset: 0px;
-    box-shadow: 0 0 0 3px var(--tn-interactive-hover);
+    background-color: var(--background-modifier-hover);
+    outline: 2px solid var(--background-modifier-border-focus);
+    outline-offset: -2px;
 }
 
 .tasknotes-plugin .task-card:focus:not(:focus-visible) {
@@ -68,9 +65,10 @@
 
 .tasknotes-plugin .task-card__main-row {
     display: flex;
-    align-items: flex-start;
-    gap: 0;
+    align-items: center;
+    gap: var(--tn-spacing-sm);
     width: 100%;
+    position: relative;
 }
 
 .tasknotes-plugin .task-card__content {
@@ -90,7 +88,7 @@
     word-wrap: break-word;
     word-break: break-word;
     white-space: normal;
-    transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color var(--tn-transition-fast);
     display: flex;
     align-items: center;
     gap: var(--tn-spacing-sm);
@@ -126,21 +124,19 @@
     align-items: center;
     gap: var(--tn-spacing-xs);
     padding: 3px 8px;
-    border-radius: 12px;
+    border-radius: var(--tn-radius-md);
     font-size: var(--tn-font-size-sm);
     line-height: 1.2;
     font-weight: 500;
-    background: color-mix(in srgb, var(--tn-bg-secondary) 60%, transparent);
-    color: var(--tn-text-muted);
-    border: 1px solid color-mix(in srgb, var(--tn-border-color) 30%, transparent);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(4px);
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+    transition: background var(--tn-transition-fast), border-color var(--tn-transition-fast);
 }
 
 .tasknotes-plugin .task-card__metadata-pill:hover {
-    background: var(--tn-bg-secondary);
-    border-color: var(--tn-border-color);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 8%, transparent);
+    background: var(--background-modifier-hover);
+    border-color: var(--background-modifier-border-hover);
 }
 
 .tasknotes-plugin .task-card__metadata-pill--blocked {
@@ -162,11 +158,6 @@
     border-color: color-mix(in srgb, var(--tn-color-error) 70%, transparent);
 }
 
-.tasknotes-plugin .task-card__metadata-separator {
-    color: var(--tn-text-faint);
-    opacity: 0.5;
-    font-size: 0.8em;
-}
 
 .tasknotes-plugin .task-card__tag {
     background: var(--tn-bg-secondary);
@@ -221,7 +212,7 @@
     );
     opacity: 0;
     transition: opacity var(--tn-transition-fast);
-    border-radius: 2px;
+    border-radius: var(--tn-radius-xs);
 }
 
 .tasknotes-plugin .task-card[draggable="true"]:hover .task-card__drag-handle {
@@ -257,21 +248,17 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    margin-right: 10px;
     flex-shrink: 0;
     border: 2px solid color-mix(in srgb, var(--tn-border-color) 80%, transparent);
     background-color: transparent;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    align-self: center;
-    cursor: var(--cursor);
+    transition: all var(--tn-transition-fast);
     position: relative;
     box-shadow: none;
 }
 
 .tasknotes-plugin .task-card__status-dot:hover {
-    border-color: var(--tn-interactive-accent);
-    border-width: 2.5px;
-    transform: scale(1.15);
+    background-color: color-mix(in srgb, var(--next-status-color, var(--tn-interactive-accent)) 30%, transparent);
+    border-color: var(--next-status-color, var(--tn-interactive-accent));
 }
 
 /* Completed status - filled circle with status color */
@@ -283,7 +270,8 @@
 }
 
 .tasknotes-plugin .task-card--completed > .task-card__main-row .task-card__status-dot:hover {
-    /* No glow effect */
+    background-color: color-mix(in srgb, var(--next-status-color, var(--tn-interactive-accent)) 50%, var(--current-status-color, var(--tn-color-success)));
+    border-color: var(--next-status-color, var(--tn-interactive-accent));
 }
 
 /* Completion animation - subtle pulse when task is completed */
@@ -306,35 +294,77 @@
     animation: status-complete 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Status dot with icon mode - uses Lucide icons from theme */
+.tasknotes-plugin .task-card__status-dot--icon {
+    border: none;
+    background-color: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tasknotes-plugin .task-card__status-dot--icon svg {
+    width: 18px;
+    height: 18px;
+    color: var(--current-status-color, var(--tn-text-muted));
+    stroke-width: 2;
+}
+
+.tasknotes-plugin .task-card__status-dot--icon:hover svg {
+    color: var(--next-status-color, var(--tn-interactive-accent));
+}
+
+/* Completed state for icon mode */
+.tasknotes-plugin .task-card--completed > .task-card__main-row .task-card__status-dot--icon {
+    background-color: transparent;
+}
+
+.tasknotes-plugin .task-card--completed > .task-card__main-row .task-card__status-dot--icon svg {
+    color: var(--current-status-color, var(--tn-color-success));
+}
+
+.tasknotes-plugin .task-card--completed > .task-card__main-row .task-card__status-dot--icon:hover svg {
+    color: var(--next-status-color, var(--tn-interactive-accent));
+}
+
+/* =================================================================
+   BADGE AREA - Groups secondary indicators (recurring, reminder, project)
+   ================================================================= */
+
+.tasknotes-plugin .task-card__badges {
+    display: flex;
+    align-items: center;
+    gap: var(--tn-spacing-xs);
+    flex-shrink: 0;
+}
+
+/* Hide badges container when empty */
+.tasknotes-plugin .task-card__badges:empty {
+    display: none;
+}
+
 .tasknotes-plugin .task-card__recurring-indicator {
-    position: absolute;
-    top: 8px;
-    right: 20px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-muted);
     opacity: 0.7;
-    z-index: 1;
     display: none; /* Hidden by default, shown via modifier */
     align-items: center;
     justify-content: center;
-    cursor: var(--cursor);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border-radius: 4px;
-    padding: 2px;
+    transition: all var(--tn-transition-fast);
+    border-radius: var(--tn-radius-sm);
+    flex-shrink: 0;
 }
 
 .tasknotes-plugin .task-card__recurring-indicator:hover {
     opacity: 1;
     color: var(--interactive-accent);
     background: var(--background-modifier-hover);
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 10%, transparent);
 }
 
 .tasknotes-plugin .task-card__recurring-indicator svg {
-    width: 100%;
-    height: 100%;
+    width: 14px;
+    height: 14px;
 }
 
 /* Recurrence instance statistics pills */
@@ -347,84 +377,68 @@
     opacity: 0.7;
 }
 
-/* Reminder indicator - positioned to not overlap with other indicators */
+/* Reminder indicator */
 .tasknotes-plugin .task-card__reminder-indicator {
-    position: absolute;
-    top: 8px;
-    width: 16px;
-    right: 40px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-muted);
     opacity: 0.7;
-    cursor: var(--cursor);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--tn-transition-fast);
     display: flex;
-    padding: 2px;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
+    border-radius: var(--tn-radius-sm);
+    flex-shrink: 0;
 }
 
 .tasknotes-plugin .task-card__reminder-indicator:hover {
     opacity: 1;
     color: var(--interactive-accent);
     background: var(--background-modifier-hover);
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 10%, transparent);
 }
 
 .tasknotes-plugin .task-card__reminder-indicator svg {
-    width: 100%;
-    height: 100%;
+    width: 14px;
+    height: 14px;
 }
 
+/* Project indicator */
 .tasknotes-plugin .task-card__project-indicator {
-    position: absolute;
-    top: 8px;
-    right: 60px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-muted);
     opacity: 0.7;
-    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
-    padding: 2px;
-    cursor: var(--cursor);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: var(--tn-radius-sm);
+    transition: all var(--tn-transition-fast);
+    flex-shrink: 0;
 }
 
 .tasknotes-plugin .task-card__project-indicator:hover {
     opacity: 1;
     color: var(--interactive-accent);
     background: var(--background-modifier-hover);
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 10%, transparent);
 }
 
 .tasknotes-plugin .task-card__project-indicator svg {
-    width: 100%;
-    height: 100%;
+    width: 14px;
+    height: 14px;
 }
 
+/* Chevron for expandable subtasks */
 .tasknotes-plugin .task-card__chevron {
-    position: absolute;
-    top: 8px;
-    right: 100px; /* Position after blocking toggle */
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-muted);
     opacity: 0;
-    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius-s);
-    padding: 2px;
-    cursor: var(--cursor);
+    border-radius: var(--tn-radius-sm);
     transition: all var(--tn-transition-fast);
+    flex-shrink: 0;
 }
 
 .tasknotes-plugin .task-card__chevron:hover {
@@ -436,11 +450,12 @@
 /* In left mode, chevrons are always visible (like group chevrons) */
 .tasknotes-plugin .task-card.task-card--chevron-left .task-card__chevron {
     opacity: 1;
-    left: 10px;
-    right: auto;
-    top: 14px;
-    width: 24px;
-    height: 24px;
+    position: absolute;
+    left: calc(-1 * var(--tn-spacing-lg) - 14px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
 }
 
 .tasknotes-plugin .task-card:hover .task-card__chevron {
@@ -448,8 +463,8 @@
 }
 
 .tasknotes-plugin .task-card__chevron svg {
-    width: 100%;
-    height: 100%;
+    width: 14px;
+    height: 14px;
     transition: transform var(--tn-transition-fast);
 }
 
@@ -457,21 +472,18 @@
     transform: rotate(90deg);
 }
 
+/* Blocking toggle */
 .tasknotes-plugin .task-card__blocking-toggle {
-    position: absolute;
-    top: 8px;
-    right: 80px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-muted);
     opacity: 0.8;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: var(--cursor);
     transition: color var(--tn-transition-fast), background var(--tn-transition-fast), opacity var(--tn-transition-fast);
-    border-radius: var(--radius-s);
-    padding: 2px;
+    border-radius: var(--tn-radius-sm);
+    flex-shrink: 0;
 }
 
 .tasknotes-plugin .task-card__blocking-toggle:hover {
@@ -481,8 +493,8 @@
 }
 
 .tasknotes-plugin .task-card__blocking-toggle svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
 }
 
 .tasknotes-plugin .task-card__blocking-toggle--expanded {
@@ -496,13 +508,13 @@
 
 /* Left-position variant for subtask chevron */
 .tasknotes-plugin .task-card.task-card--chevron-left {
-    /* Reserve gutter for a 24x24 chevron plus spacing */
-    padding-left: calc(var(--tn-spacing-lg) + 30px);
+    /* Reserve gutter for chevron plus spacing */
+    padding-left: calc(var(--tn-spacing-lg) + 20px);
 }
 
 /* Ensure nested cards in left mode also reserve chevron gutter */
 .tasknotes-plugin .task-card__subtasks .task-card.task-card--chevron-left {
-    padding-left: calc(var(--tn-spacing-md) + 30px);
+    padding-left: calc(var(--tn-spacing-md) + 20px);
 }
 
 .tasknotes-plugin .task-card__subtasks {
@@ -527,7 +539,7 @@
         transparent
     );
     opacity: 0;
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity var(--tn-transition-fast);
 }
 
 .tasknotes-plugin .task-card:hover .task-card__subtasks::before {
@@ -545,7 +557,7 @@
 
 .tasknotes-plugin .task-card--subtask {
     background: color-mix(in srgb, var(--tn-bg-secondary) 25%, transparent);
-    border-radius: 6px;
+    border-radius: var(--tn-radius-sm);
     backdrop-filter: blur(2px);
 }
 
@@ -574,7 +586,7 @@
         transparent
     );
     opacity: 0;
-    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity var(--tn-transition-fast);
 }
 
 .tasknotes-plugin .task-card:hover .task-card__blocking::before {
@@ -583,7 +595,7 @@
 
 .tasknotes-plugin .task-card--dependency {
     background: color-mix(in srgb, var(--tn-color-error) 4%, transparent);
-    border-radius: 6px;
+    border-radius: var(--tn-radius-sm);
     border-left: 2px solid color-mix(in srgb, var(--tn-color-error) 20%, transparent);
     padding-left: calc(var(--tn-spacing-md) - 2px);
 }
@@ -609,27 +621,22 @@
 }
 
 .tasknotes-plugin .task-card__context-menu {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     color: var(--tn-text-faint);
-    cursor: var(--cursor);
     opacity: 0;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--tn-transition-fast);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 10;
-    border-radius: 4px;
+    border-radius: var(--tn-radius-sm);
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .tasknotes-plugin .task-card__context-menu:hover {
     color: var(--tn-text-normal);
     background: var(--tn-interactive-hover);
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 10%, transparent);
 }
 
 .tasknotes-plugin .task-card:hover .task-card__context-menu {
@@ -654,19 +661,18 @@
 
 /* Enhanced priority dot hover for context menu */
 .tasknotes-plugin .task-card__priority-dot {
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--tn-transition-fast);
     box-shadow: none;
 }
 
 .tasknotes-plugin .task-card__priority-dot:hover {
-    transform: scale(1.3);
+    opacity: 0.8;
 }
 
 /* Hoverable date text elements */
 .tasknotes-plugin .task-card__metadata-date {
-    cursor: var(--cursor);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border-radius: 4px;
+    transition: all var(--tn-transition-fast);
+    border-radius: var(--tn-radius-sm);
     padding: 3px 6px;
     margin: -3px -6px;
     position: relative;
@@ -675,7 +681,6 @@
 .tasknotes-plugin .task-card__metadata-date:hover {
     background: var(--background-modifier-hover);
     color: var(--interactive-accent);
-    box-shadow: 0 2px 4px color-mix(in srgb, var(--tn-shadow-color, black) 8%, transparent);
 }
 
 .tasknotes-plugin .task-card__metadata-date--due:hover {
@@ -688,15 +693,24 @@
     color: var(--tn-color-info);
 }
 
+/* Overdue due dates - use the hover background color for text */
+.tasknotes-plugin .task-card__metadata-date--overdue {
+    color: var(--tn-color-error);
+}
+
+/* Past scheduled dates - use the hover background color for text */
+.tasknotes-plugin .task-card__metadata-date--past {
+    color: var(--tn-color-info);
+}
+
 /* Project links */
 .tasknotes-plugin .task-card__project-link {
     color: var(--interactive-accent);
     text-decoration: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border-radius: 4px;
+    transition: all var(--tn-transition-fast);
+    border-radius: var(--tn-radius-sm);
     padding: 2px 4px;
     margin: -2px -4px;
-    cursor: var(--cursor);
     display: inline-block;
     position: relative;
     z-index: 1;
@@ -808,11 +822,9 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    margin-right: 6px;
     flex-shrink: 0;
-    align-self: center;
     background-color: var(--priority-color, transparent);
-    cursor: var(--cursor);
+    margin: 0 var(--tn-spacing-xs);
 }
 
 /* Dynamic priority colors using CSS variables set by PriorityManager */
@@ -849,7 +861,7 @@
 /* Minimal animations - Use theme colors */
 .tasknotes-plugin .task-card--updated {
     background-color: var(--tn-interactive-hover);
-    transition: background-color 0.3s ease;
+    transition: background-color var(--tn-transition-fast);
 }
 
 /* =================================================================
@@ -1042,11 +1054,8 @@
 
 /* Inline layout - single line, compact display for editor task links */
 .tasknotes-plugin .task-card--layout-inline {
-    /* Override default flex-direction to create horizontal layout */
-    display: inline-flex !important;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--tn-spacing-xs);
+    /* Use inline display to respect line boundaries */
+    display: inline !important;
 
     /* Minimal padding - no indentation needed in inline mode */
     padding: 2px 0;
@@ -1058,8 +1067,7 @@
     border: none;
     border-radius: 0;
 
-    /* Size constraints - small offset to prevent wrapping to new line */
-    max-width: calc(100% - 40px);
+    /* Size constraints */
     min-height: auto;
 
     /* Prevent text from breaking into multiple lines */
@@ -1073,6 +1081,18 @@
     background-color: transparent;
 }
 
+/* Disable drag cursor for inline tasks - they're not draggable */
+.tasknotes-plugin .task-card--layout-inline[draggable="true"]:hover {
+    cursor: default;
+    transform: none;
+    box-shadow: none;
+}
+
+.tasknotes-plugin .task-card--layout-inline[draggable="true"]:active {
+    cursor: default;
+    transform: none;
+}
+
 /* Remove chevron gutter padding in inline mode */
 .tasknotes-plugin .task-card--layout-inline,
 .tasknotes-plugin .task-card--layout-inline.task-card--chevron-left {
@@ -1082,75 +1102,61 @@
 
 /* Main row in inline mode - horizontal layout */
 .tasknotes-plugin .task-card--layout-inline .task-card__main-row {
-    display: inline-flex !important;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--tn-spacing-xs);
-    flex: 1;
-    min-width: 0;
+    display: inline !important;
     vertical-align: baseline;
 }
 
 /* Content in inline mode - horizontal, truncated */
 .tasknotes-plugin .task-card--layout-inline .task-card__content {
-    display: inline-flex !important;
-    flex-direction: row;
-    align-items: baseline; /* Align items by baseline instead of center */
-    gap: var(--tn-spacing-sm);
-    min-width: 0;
-    overflow: visible; /* Allow scrollbar to overflow without affecting layout */
+    display: inline !important;
     vertical-align: baseline;
 }
 
 /* Title in inline mode - truncate with ellipsis */
 .tasknotes-plugin .task-card--layout-inline .task-card__title {
-    display: inline-flex !important;
+    display: inline !important;
     font-size: inherit; /* Use editor's font size */
     font-weight: 400;
-    max-width: min(600px, 80vw); /* Responsive max-width for longer titles */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     margin: 0;
-    gap: var(--tn-spacing-xs);
-    align-items: baseline; /* Align title children by baseline */
-    flex-shrink: 0; /* Prevent title from shrinking */
     vertical-align: baseline;
 }
 
-/* Metadata in inline mode - horizontal scrollable when too long */
-.tasknotes-plugin .task-card--layout-inline .task-card__metadata {
-    display: inline-block; /* Use inline-block instead of inline-flex to avoid baseline shift */
-    font-size: var(--tn-font-size-sm);
-    margin: 0; /* No margin to avoid shifting */
-    padding: 0; /* No padding to avoid shifting */
-    line-height: inherit; /* Match parent line-height */
-    vertical-align: baseline; /* Ensure baseline alignment with title */
-    overflow-x: auto; /* Enable horizontal scrolling */
-    overflow-y: hidden; /* Hide vertical overflow completely */
-    max-width: 100%; /* Don't exceed container width */
-    white-space: nowrap; /* Prevent wrapping */
-    /* Use overlay scrollbars that don't take up layout space */
-    scrollbar-width: none; /* Hide scrollbar by default (Firefox) */
+/* Title text in inline mode - ensure ellipsis works */
+.tasknotes-plugin .task-card--layout-inline .task-card__title-text {
+    display: inline !important;
+    vertical-align: baseline;
 }
 
-/* Show thin scrollbar on hover (Firefox) */
+/* Metadata in inline mode - stays on same line, scrolls if needed */
+.tasknotes-plugin .task-card--layout-inline .task-card__metadata {
+    display: inline-block !important;
+    font-size: var(--tn-font-size-sm);
+    margin: 0;
+    margin-left: 0.5em; /* Space between title and metadata */
+    padding: 0;
+    vertical-align: text-bottom;
+    position: relative;
+    top: -0.15em;
+    white-space: nowrap;
+    width: fit-content;
+    min-width: min(30%, 300px);
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata:hover {
     scrollbar-width: thin;
     scrollbar-color: var(--background-modifier-border) transparent;
 }
 
-/* Wrapper for metadata items to maintain horizontal layout */
-.tasknotes-plugin .task-card--layout-inline .task-card__metadata > * {
-    display: inline;
-    vertical-align: baseline;
-    line-height: inherit;
+.tasknotes-plugin .task-card--layout-inline .task-card__metadata::-webkit-scrollbar {
+    height: 0;
 }
 
-/* Webkit scrollbar styling - overlay scrollbar that doesn't affect layout */
-.tasknotes-plugin .task-card--layout-inline .task-card__metadata::-webkit-scrollbar {
-    height: 6px; /* Slightly taller for easier grabbing */
-    position: absolute; /* Overlay scrollbar */
+.tasknotes-plugin .task-card--layout-inline .task-card__metadata:hover::-webkit-scrollbar {
+    height: 4px;
 }
 
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata::-webkit-scrollbar-track {
@@ -1158,79 +1164,100 @@
 }
 
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 3px;
+    background: var(--background-modifier-border);
+    border-radius: 2px;
 }
 
-.tasknotes-plugin .task-card--layout-inline .task-card__metadata:hover::-webkit-scrollbar-thumb {
-    background: var(--background-modifier-border);
+/* Wrapper for metadata items in inline mode */
+.tasknotes-plugin .task-card--layout-inline .task-card__metadata > * {
+    display: inline;
+    vertical-align: baseline;
+}
+
+.tasknotes-plugin .task-card--layout-inline .task-card__metadata > *:last-child {
+    margin-right: 0 !important;
 }
 
 /* Smaller status dot in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__status-dot {
-    width: 12px;
-    height: 12px;
-    margin-right: 4px;
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.25em;
     border-width: 1.5px;
+    vertical-align: baseline;
+    transform: translateY(0.1em);
 }
 
 /* Smaller priority dot in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__priority-dot {
-    width: 12px;
-    height: 12px;
-    margin-right: 4px;
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    margin: 0 0.25em 0 0;
     border-width: 1.5px;
+    vertical-align: baseline;
+    transform: translateY(0.05em);
 }
 
 /* Compact indicators in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__recurring-indicator,
 .tasknotes-plugin .task-card--layout-inline .task-card__reminder-indicator {
+    display: inline-block;
     position: static;
-    width: 12px;
-    height: 12px;
-    margin-right: 2px;
+    width: 0.85em;
+    height: 0.85em;
+    margin-right: 0.15em;
+    vertical-align: baseline;
 }
 
 /* Compact context menu in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__context-menu {
-    width: 14px;
-    height: 14px;
-    padding: 2px;
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    padding: 0;
+    vertical-align: baseline;
 }
 
-/* Hide metadata separator bullets in inline mode (too cluttered) */
-.tasknotes-plugin .task-card--layout-inline .task-card__metadata-separator {
-    margin: 0 2px;
-    font-size: var(--tn-font-size-xs);
-}
-
-/* Compact date displays - remove padding */
+/* Compact date displays in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata-date {
+    display: inline;
     font-size: var(--tn-font-size-sm);
     padding: 0;
-    margin: 0;
-    white-space: nowrap; /* Prevent date from wrapping */
-    flex-shrink: 0; /* Prevent date from shrinking */
+    margin: 0 0.75em 0 0;
+    vertical-align: baseline;
 }
 
-/* Adjust metadata property spacing - remove padding */
+/* Metadata property in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata-property {
+    display: inline;
     font-size: var(--tn-font-size-sm);
     padding: 0;
-    margin: 0;
-    white-space: nowrap; /* Prevent individual properties from wrapping */
-    flex-shrink: 0; /* Prevent individual properties from shrinking */
+    margin: 0 0.75em 0 0;
+    vertical-align: baseline;
 }
 
-/* Prevent metadata pills from wrapping */
+/* Metadata pills in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata-pill {
-    white-space: nowrap; /* Prevent pills from wrapping */
-    flex-shrink: 0; /* Prevent pills from shrinking */
+    display: inline;
+    margin: 0 0.75em 0 0;
+    vertical-align: baseline;
 }
 
-/* Prevent separators from causing layout issues */
+/* Metadata separators in inline mode */
 .tasknotes-plugin .task-card--layout-inline .task-card__metadata-separator {
-    flex-shrink: 0; /* Keep separators from shrinking */
+    display: inline;
+    vertical-align: baseline;
+}
+
+/* SVG icons in inline mode - ensure they don't affect line height */
+.tasknotes-plugin .task-card--layout-inline svg {
+    display: inline-block;
+    width: 0.85em;
+    height: 0.85em;
+    vertical-align: baseline;
+    transform: translateY(0.1em);
 }
 
 /* Hide subtask-related elements in inline mode */
@@ -1250,13 +1277,112 @@
 
 /* Compact layout - smaller padding but still vertical */
 .tasknotes-plugin .task-card--layout-compact {
-    padding: var(--tn-spacing-sm) var(--tn-spacing-md);
+    padding: var(--tn-spacing-xs) var(--tn-spacing-sm);
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__main-row {
+    gap: var(--tn-spacing-xs);
 }
 
 .tasknotes-plugin .task-card--layout-compact .task-card__title {
-    font-size: var(--tn-font-size-md);
+    font-size: var(--tn-font-size-sm);
 }
 
 .tasknotes-plugin .task-card--layout-compact .task-card__metadata {
+    font-size: var(--tn-font-size-xs);
+    gap: var(--tn-spacing-xs);
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__status-dot {
+    width: 14px;
+    height: 14px;
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__priority-dot {
+    width: 8px;
+    height: 8px;
+    margin: 0 var(--tn-spacing-xs);
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__badges {
+    gap: 2px;
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__recurring-indicator,
+.tasknotes-plugin .task-card--layout-compact .task-card__reminder-indicator,
+.tasknotes-plugin .task-card--layout-compact .task-card__project-indicator,
+.tasknotes-plugin .task-card--layout-compact .task-card__chevron,
+.tasknotes-plugin .task-card--layout-compact .task-card__blocking-toggle {
+    width: 12px;
+    height: 12px;
+}
+
+.tasknotes-plugin .task-card--layout-compact .task-card__context-menu {
+    width: 12px;
+    height: 12px;
+}
+
+/* =================================================================
+   SELECTION MODE STYLES
+   ================================================================= */
+
+
+/* Selected task card styling */
+.tasknotes-plugin .task-card--selected {
+    background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+    border-radius: var(--tn-radius-sm);
+}
+
+.tasknotes-plugin .task-card--selected:hover {
+    background-color: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+}
+
+/* Primary selected task (first selected) gets a border */
+.tasknotes-plugin .task-card--selected-primary {
+    box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+
+/* Selection indicator floating badge */
+.tasknotes-plugin .tn-selection-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+    padding: 8px 16px;
+    border-radius: var(--tn-radius-md);
     font-size: var(--tn-font-size-sm);
+    font-weight: 500;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--tn-shadow-color, black) 20%, transparent);
+    z-index: 100;
+    display: none;
+    animation: tn-selection-indicator-appear 0.2s ease-out;
+    transition: background-color var(--tn-transition-fast);
+}
+
+.tasknotes-plugin .tn-selection-indicator:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+@keyframes tn-selection-indicator-appear {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Kanban card wrapper selection state */
+.tasknotes-plugin .kanban-view__card-wrapper--selected {
+    background-color: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+    border-radius: var(--tn-radius-sm);
+}
+
+/* Primary selected kanban card wrapper gets a border */
+.tasknotes-plugin .kanban-view__card-wrapper--selected-primary {
+    box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }

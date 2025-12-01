@@ -229,6 +229,11 @@ export const ru: TranslationTree = {
 					initialScrollTime: "Начальное время прокрутки",
 					initialScrollTimePlaceholder: "ЧЧ:мм:сс (например, 08:00:00)",
 					minimumEventHeight: "Минимальная высота события (px)",
+					slotEventOverlap: "Разрешить наложение событий",
+					enableSearch: "Включить поле поиска",
+					eventMaxStack: "Макс. наложенных событий (неделя/день, 0 = без ограничений)",
+					dayMaxEvents: "Макс. событий в день (месяц, 0 = авто)",
+					dayMaxEventRows: "Макс. строк событий в день (месяц, 0 = без ограничений)",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Свойство даты начала",
@@ -804,6 +809,7 @@ export const ru: TranslationTree = {
 					value: "Значение: Внутренний идентификатор, хранящийся в файлах задач (например, \"в-процессе\")",
 					label: "Метка: Отображаемое имя в интерфейсе (например, \"В процессе\")",
 					color: "Цвет: Цвет визуального индикатора для точки статуса и значков",
+					icon: "Иконка: Опциональное имя Lucide-иконки для отображения вместо цветной точки (например, \"check\", \"circle\", \"clock\"). Просмотрите иконки на lucide.dev",
 					completed: "Завершено: При отметке задачи с этим статусом считаются завершенными и могут фильтроваться по-разному",
 					autoArchive: "Автоархивирование: При включении задачи будут автоматически архивироваться после указанной задержки (1-1440 минут)",
 					orderNote: "Порядок ниже определяет последовательность при переключении между статусами нажатием на значки статуса задач.",
@@ -820,6 +826,7 @@ export const ru: TranslationTree = {
 					value: "Значение:",
 					label: "Метка:",
 					color: "Цвет:",
+					icon: "Иконка:",
 					completed: "Завершено:",
 					autoArchive: "Автоархивирование:",
 					delayMinutes: "Задержка (минуты):",
@@ -827,6 +834,7 @@ export const ru: TranslationTree = {
 				placeholders: {
 					value: "в-процессе",
 					label: "В процессе",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "Завершено",
@@ -1061,6 +1069,7 @@ export const ru: TranslationTree = {
 					name: "Локаль календаря",
 					description: "Локаль календаря для форматирования дат и календарной системы (например, \"en\", \"fa\" для фарси/персидского, \"de\" для немецкого). Оставьте пустым для автоопределения из браузера.",
 					placeholder: "Автоопределение",
+					invalidLocale: "Недопустимая локаль. Пожалуйста, введите корректный языковой тег (например, 'ru', 'en', 'fr-FR').",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const ru: TranslationTree = {
 					description: "Включить использование представлений TaskNotes в плагине Obsidian Bases. Плагин Bases должен быть включен для работы.",
 				},
 				viewCommands: {
-					header: "Команды представлений",
-					description: "Настройте, какие .base файлы открываются командами представлений. Эти команды позволяют продолжать использовать знакомые ярлыки при работе с файлами Bases.",
+					header: "Представления и файлы Base",
+					description: "TaskNotes использует файлы Obsidian Bases (.base) для своих представлений. Эти файлы автоматически создаются при запуске, если они не существуют, и настраиваются с учётом ваших текущих параметров (идентификация задач, сопоставление полей, статусы и т.д.).",
+					descriptionRegen: "Файлы Base не обновляются автоматически при изменении настроек. Чтобы применить новые настройки, удалите существующие файлы .base и перезапустите Obsidian, используйте «Создать файлы» ниже или отредактируйте их вручную.",
+					docsLink: "Просмотреть документацию по доступным формулам и параметрам настройки",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Открыть мини-календарь",
 						kanban: "Открыть представление kanban",
@@ -1717,6 +1729,7 @@ export const ru: TranslationTree = {
 		viewReleaseNotes: "Посмотреть примечания к выпуску",
 		startTimeTrackingWithSelector: "Начать отслеживание времени (выбрать задачу)",
 		editTimeEntries: "Редактировать временные записи (выбрать задачу)",
+		createOrOpenTask: "Создать или открыть задачу",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const ru: TranslationTree = {
 			tagsPlaceholder: "тег1, тег2",
 			timeEstimateLabel: "Оценка времени (минуты)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Несохранённые изменения",
+				message: "У вас есть несохранённые изменения. Хотите сохранить их?",
+				save: "Сохранить изменения",
+				discard: "Отменить изменения",
+				cancel: "Продолжить редактирование",
+			},
 			dependencies: {
 				blockedBy: "Заблокирована",
 				blocking: "Блокирует",
@@ -1974,6 +1994,20 @@ export const ru: TranslationTree = {
 			dueDate: {
 				overdue: "Срок: {date} (просрочено)",
 				today: "Срок: Сегодня",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "Создать или открыть задачу",
+			placeholder: "Поиск задач или введите для создания новой...",
+			instructions: {
+				create: "чтобы создать новую задачу",
+			},
+			footer: {
+				createLabel: " для создания: ",
+			},
+			notices: {
+				emptyQuery: "Пожалуйста, введите описание задачи",
+				invalidTitle: "Не удалось распознать допустимое название задачи",
 			},
 		},
 		taskCreation: {

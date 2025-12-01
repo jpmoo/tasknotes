@@ -229,6 +229,11 @@ export const ja: TranslationTree = {
 					initialScrollTime: "初期スクロール時刻",
 					initialScrollTimePlaceholder: "HH:mm:ss（例：08:00:00）",
 					minimumEventHeight: "最小イベント高さ（px）",
+					slotEventOverlap: "イベントの重なりを許可",
+					enableSearch: "検索ボックスを有効化",
+					eventMaxStack: "最大スタックイベント数（週/日表示、0 = 無制限）",
+					dayMaxEvents: "1日あたりの最大イベント数（月表示、0 = 自動）",
+					dayMaxEventRows: "1日あたりの最大イベント行数（月表示、0 = 無制限）",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "開始日プロパティ",
@@ -804,6 +809,7 @@ export const ja: TranslationTree = {
 					value: "値：タスクファイルに保存される内部識別子（例：\"in-progress\"）",
 					label: "ラベル：インターフェースに表示される表示名（例：\"進行中\"）",
 					color: "色：ステータスドットとバッジの視覚的インジケーター色",
+					icon: "アイコン：カラードットの代わりに表示するオプションのLucideアイコン名（例：\"check\"、\"circle\"、\"clock\"）。lucide.devでアイコンを閲覧",
 					completed: "完了：チェックすると、このステータスのタスクは完了と見なされ、異なってフィルタリングされる場合があります",
 					autoArchive: "自動アーカイブ：有効にすると、指定された遅延後にタスクが自動的にアーカイブされます（1-1440分）",
 					orderNote: "以下の順序は、タスクステータスバッジをクリックしてステータスを切り替える際のシーケンスを決定します。",
@@ -820,6 +826,7 @@ export const ja: TranslationTree = {
 					value: "値：",
 					label: "ラベル：",
 					color: "色：",
+					icon: "アイコン：",
 					completed: "完了：",
 					autoArchive: "自動アーカイブ：",
 					delayMinutes: "遅延（分）：",
@@ -827,6 +834,7 @@ export const ja: TranslationTree = {
 				placeholders: {
 					value: "in-progress",
 					label: "進行中",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "完了",
@@ -1061,6 +1069,7 @@ export const ja: TranslationTree = {
 					name: "カレンダーロケール",
 					description: "日付形式とカレンダーシステムのカレンダーロケール（例：\"en\"、\"fa\"はFarsi/Persian、\"de\"はGerman）。ブラウザーから自動検出するには空白のままにします。",
 					placeholder: "自動検出",
+					invalidLocale: "無効なロケールです。有効な言語タグを入力してください（例：'ja'、'en'、'fr-FR'）。",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const ja: TranslationTree = {
 					description: "TaskNotesビューをObsidian Basesプラグイン内で使用できるようにします。これが機能するにはBasesプラグインが有効である必要があります。",
 				},
 				viewCommands: {
-					header: "ビューコマンド",
-					description: "ビューコマンドで開く.baseファイルを設定します。これらのコマンドを使用すると、Basesファイルで作業しながら使い慣れたショートカットを引き続き使用できます。",
+					header: "ビューとBaseファイル",
+					description: "TaskNotesはObsidian Basesファイル（.base）を使用してビューを表示します。これらのファイルは起動時に存在しない場合に自動的に生成され、現在の設定（タスク識別、フィールドマッピング、ステータスなど）で構成されます。",
+					descriptionRegen: "Baseファイルは設定を変更しても自動的には更新されません。新しい設定を適用するには、既存の.baseファイルを削除してObsidianを再起動するか、下の「ファイルを作成」を使用するか、手動で編集してください。",
+					docsLink: "利用可能な数式とカスタマイズオプションのドキュメントを表示",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "ミニカレンダービューを開く",
 						kanban: "カンバンビューを開く",
@@ -1717,6 +1729,7 @@ export const ja: TranslationTree = {
 		viewReleaseNotes: "リリースノートを表示",
 		startTimeTrackingWithSelector: "時間追跡を開始（タスクを選択）",
 		editTimeEntries: "時間エントリを編集（タスクを選択）",
+		createOrOpenTask: "タスクを作成または開く",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const ja: TranslationTree = {
 			tagsPlaceholder: "tag1, tag2",
 			timeEstimateLabel: "時間見積もり（分）",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "未保存の変更",
+				message: "未保存の変更があります。保存しますか？",
+				save: "変更を保存",
+				discard: "変更を破棄",
+				cancel: "編集を続ける",
+			},
 			dependencies: {
 				blockedBy: "ブロック元",
 				blocking: "ブロックしている",
@@ -1974,6 +1994,20 @@ export const ja: TranslationTree = {
 			dueDate: {
 				overdue: "期限：{date}（期限切れ）",
 				today: "期限：今日",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "タスクを作成または開く",
+			placeholder: "タスクを検索または入力して新規作成...",
+			instructions: {
+				create: "で新しいタスクを作成",
+			},
+			footer: {
+				createLabel: " で作成: ",
+			},
+			notices: {
+				emptyQuery: "タスクの説明を入力してください",
+				invalidTitle: "有効なタスクタイトルを認識できませんでした",
 			},
 		},
 		taskCreation: {

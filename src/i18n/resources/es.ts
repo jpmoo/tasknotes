@@ -229,6 +229,11 @@ export const es: TranslationTree = {
 					initialScrollTime: "Hora de desplazamiento inicial",
 					initialScrollTimePlaceholder: "HH:mm:ss (ej. 08:00:00)",
 					minimumEventHeight: "Altura mínima del evento (px)",
+					slotEventOverlap: "Permitir superposición de eventos",
+					enableSearch: "Habilitar cuadro de búsqueda",
+					eventMaxStack: "Máx. eventos apilados (vista semana/día, 0 = ilimitado)",
+					dayMaxEvents: "Máx. eventos por día (vista mes, 0 = automático)",
+					dayMaxEventRows: "Máx. filas de eventos por día (vista mes, 0 = ilimitado)",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Propiedad de fecha de inicio",
@@ -804,6 +809,7 @@ export const es: TranslationTree = {
 					value: "Valor: El identificador interno almacenado en tus archivos de tarea (ej. \"en-progreso\")",
 					label: "Etiqueta: El nombre mostrado en la interfaz (ej. \"En progreso\")",
 					color: "Color: Color indicador visual para el punto de estado y distintivos",
+					icon: "Icono: Nombre de icono Lucide opcional para mostrar en lugar del punto de color (ej. \"check\", \"circle\", \"clock\"). Explora iconos en lucide.dev",
 					completed: "Completado: Cuando se marca, las tareas con este estado se consideran terminadas y pueden filtrarse de manera diferente",
 					autoArchive: "Auto-archivar: Cuando está habilitado, las tareas se archivarán automáticamente después del retraso especificado (1-1440 minutos)",
 					orderNote: "El orden de abajo determina la secuencia al alternar entre estados haciendo clic en distintivos de estado de tarea.",
@@ -820,6 +826,7 @@ export const es: TranslationTree = {
 					value: "Valor:",
 					label: "Etiqueta:",
 					color: "Color:",
+					icon: "Icono:",
 					completed: "Completado:",
 					autoArchive: "Auto-archivar:",
 					delayMinutes: "Retraso (minutos):",
@@ -827,6 +834,7 @@ export const es: TranslationTree = {
 				placeholders: {
 					value: "en-progreso",
 					label: "En progreso",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "Completado",
@@ -1061,6 +1069,7 @@ export const es: TranslationTree = {
 					name: "Configuración regional del calendario",
 					description: "Configuración regional del calendario para formato de fecha y sistema de calendario (ej. \"en\", \"fa\" para Farsi/Persa, \"de\" para Alemán). Dejar vacío para auto-detectar desde el navegador.",
 					placeholder: "Auto-detectar",
+					invalidLocale: "Configuración regional inválida. Por favor, introduzca un código de idioma válido (ej. 'es', 'en', 'fr-FR').",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const es: TranslationTree = {
 					description: "Habilitar vistas de TaskNotes para usar dentro del plugin Obsidian Bases. El plugin Bases debe estar habilitado para que esto funcione.",
 				},
 				viewCommands: {
-					header: "Comandos de vista",
-					description: "Configura qué archivos .base se abren con los comandos de vista. Estos comandos te permiten seguir usando atajos familiares mientras trabajas con archivos de Bases.",
+					header: "Vistas y archivos base",
+					description: "TaskNotes utiliza archivos de Obsidian Bases (.base) para sus vistas. Estos archivos se generan automáticamente al inicio si no existen, configurados con tus ajustes actuales (identificación de tareas, mapeo de campos, estados, etc.).",
+					descriptionRegen: "Los archivos base no se actualizan automáticamente cuando cambias la configuración. Para aplicar nuevos ajustes, elimina los archivos .base existentes y reinicia Obsidian, usa \"Crear archivos\" abajo, o edítalos manualmente.",
+					docsLink: "Ver documentación para fórmulas disponibles y opciones de personalización",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Abrir vista de mini calendario",
 						kanban: "Abrir vista kanban",
@@ -1717,6 +1729,7 @@ export const es: TranslationTree = {
 		viewReleaseNotes: "Ver notas de la versión",
 		startTimeTrackingWithSelector: "Iniciar seguimiento de tiempo (seleccionar tarea)",
 		editTimeEntries: "Editar entradas de tiempo (seleccionar tarea)",
+		createOrOpenTask: "Crear o abrir tarea",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const es: TranslationTree = {
 			tagsPlaceholder: "etiqueta1, etiqueta2",
 			timeEstimateLabel: "Estimación de tiempo (minutos)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Cambios sin guardar",
+				message: "Tiene cambios sin guardar. ¿Desea guardarlos?",
+				save: "Guardar cambios",
+				discard: "Descartar cambios",
+				cancel: "Seguir editando",
+			},
 			dependencies: {
 				blockedBy: "Bloqueado por",
 				blocking: "Bloqueando",
@@ -1974,6 +1994,20 @@ export const es: TranslationTree = {
 			dueDate: {
 				overdue: "Vencimiento: {date} (vencido)",
 				today: "Vencimiento: Hoy",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "Crear o abrir tarea",
+			placeholder: "Buscar tareas o escribir para crear nueva...",
+			instructions: {
+				create: "para crear nueva tarea",
+			},
+			footer: {
+				createLabel: " para crear: ",
+			},
+			notices: {
+				emptyQuery: "Por favor ingrese una descripción de tarea",
+				invalidTitle: "No se pudo reconocer un título de tarea válido",
 			},
 		},
 		taskCreation: {

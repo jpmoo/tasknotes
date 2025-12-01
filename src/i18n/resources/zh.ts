@@ -223,6 +223,11 @@ export const zh: TranslationTree = {
 					showAllDaySlot: "显示全天时段",
 					showTodayHighlight: "突出显示今天",
 					showSelectionPreview: "显示选择预览",
+					slotEventOverlap: "允许事件重叠",
+					enableSearch: "启用搜索框",
+					eventMaxStack: "最大堆叠事件数（周/日视图，0 = 无限制）",
+					dayMaxEvents: "每天最大事件数（月视图，0 = 自动）",
+					dayMaxEventRows: "每天最大事件行数（月视图，0 = 无限制）",
 					timeFormat: "时间格式",
 					timeFormat12: "12小时制（AM/PM）",
 					timeFormat24: "24小时制",
@@ -804,6 +809,7 @@ export const zh: TranslationTree = {
 					value: "值：存储在任务文件中的内部标识符（例如，\"进行中\"）",
 					label: "标签：在界面中显示的显示名称（例如，\"进行中\"）",
 					color: "颜色：状态点和徽章的视觉指示器颜色",
+					icon: "图标：可选的 Lucide 图标名称，用于替代彩色圆点显示（例如，\"check\"、\"circle\"、\"clock\"）。在 lucide.dev 浏览图标",
 					completed: "已完成：选中时，具有此状态的任务被视为已完成，可能以不同方式过滤",
 					autoArchive: "自动归档：启用时，任务将在指定延迟后自动归档（1-1440分钟）",
 					orderNote: "下面的顺序确定点击任务状态徽章时循环状态的顺序。",
@@ -820,6 +826,7 @@ export const zh: TranslationTree = {
 					value: "值：",
 					label: "标签：",
 					color: "颜色：",
+					icon: "图标：",
 					completed: "已完成：",
 					autoArchive: "自动归档：",
 					delayMinutes: "延迟（分钟）：",
@@ -827,6 +834,7 @@ export const zh: TranslationTree = {
 				placeholders: {
 					value: "进行中",
 					label: "进行中",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "已完成",
@@ -1061,6 +1069,7 @@ export const zh: TranslationTree = {
 					name: "日历区域设置",
 					description: "日期格式和日历系统的日历区域设置（例如，\"en\"、\"fa\"表示波斯语/波斯文、\"de\"表示德语）。留空以从浏览器自动检测。",
 					placeholder: "自动检测",
+					invalidLocale: "无效的区域设置。请输入有效的语言标签（例如：'zh'、'en'、'fr-FR'）。",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const zh: TranslationTree = {
 					description: "启用TaskNotes视图在Obsidian Bases插件中使用。必须启用Bases插件才能工作。",
 				},
 				viewCommands: {
-					header: "视图命令",
-					description: "配置视图命令打开哪些 .base 文件。这些命令让您在使用 Bases 文件时继续使用熟悉的快捷方式。",
+					header: "视图与 Base 文件",
+					description: "TaskNotes 使用 Obsidian Bases 文件（.base）来呈现视图。这些文件在启动时自动生成（如果不存在），并使用您当前的设置进行配置（任务识别、字段映射、状态等）。",
+					descriptionRegen: "更改设置时，Base 文件不会自动更新。要应用新设置，请删除现有的 .base 文件并重新启动 Obsidian，或使用下方的「创建文件」，或手动编辑它们。",
+					docsLink: "查看可用公式和自定义选项的文档",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "打开迷你日历视图",
 						kanban: "打开看板视图",
@@ -1717,6 +1729,7 @@ export const zh: TranslationTree = {
 		viewReleaseNotes: "查看版本说明",
 		startTimeTrackingWithSelector: "开始时间跟踪（选择任务）",
 		editTimeEntries: "编辑时间条目（选择任务）",
+		createOrOpenTask: "创建或打开任务",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const zh: TranslationTree = {
 			tagsPlaceholder: "标签1，标签2",
 			timeEstimateLabel: "时间估计（分钟）",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "未保存的更改",
+				message: "您有未保存的更改。是否要保存？",
+				save: "保存更改",
+				discard: "放弃更改",
+				cancel: "继续编辑",
+			},
 			dependencies: {
 				blockedBy: "被阻塞",
 				blocking: "阻塞中",
@@ -1974,6 +1994,20 @@ export const zh: TranslationTree = {
 			dueDate: {
 				overdue: "截止日期：{date}（逾期）",
 				today: "截止日期：今天",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "创建或打开任务",
+			placeholder: "搜索任务或输入以创建新任务...",
+			instructions: {
+				create: "创建新任务",
+			},
+			footer: {
+				createLabel: " 创建：",
+			},
+			notices: {
+				emptyQuery: "请输入任务描述",
+				invalidTitle: "无法识别有效的任务标题",
 			},
 		},
 		taskCreation: {

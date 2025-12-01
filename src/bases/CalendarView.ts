@@ -125,6 +125,10 @@ export class CalendarView extends BasesViewBase {
 		timeFormat: string;
 		scrollTime: string;
 		eventMinHeight: number;
+		slotEventOverlap: boolean;
+		eventMaxStack: number | null;
+		dayMaxEvents: number | boolean;
+		dayMaxEventRows: number | boolean;
 		// Locale (non-configurable per view)
 		locale: string;
 
@@ -181,6 +185,10 @@ export class CalendarView extends BasesViewBase {
 			selectMirror: calendarSettings.selectMirror,
 			timeFormat: calendarSettings.timeFormat,
 			eventMinHeight: calendarSettings.eventMinHeight,
+			slotEventOverlap: calendarSettings.slotEventOverlap,
+			eventMaxStack: calendarSettings.eventMaxStack,
+			dayMaxEvents: calendarSettings.dayMaxEvents,
+			dayMaxEventRows: calendarSettings.dayMaxEventRows,
 			locale: calendarSettings.locale,
 
 			// Property-based events
@@ -262,7 +270,57 @@ export class CalendarView extends BasesViewBase {
 	}
 
 	/**
+	 * Read event toggle options from config.
+	 * These should be re-read on every render to respond to toggle changes.
+	 */
+	private readEventToggles(): void {
+		// Guard: config may not be set yet if called too early
+		if (!this.config || typeof this.config.get !== 'function') {
+			return;
+		}
+
+		try {
+			this.viewOptions.showScheduled = this.config.get('showScheduled') ?? this.viewOptions.showScheduled;
+			this.viewOptions.showDue = this.config.get('showDue') ?? this.viewOptions.showDue;
+			this.viewOptions.showRecurring = this.config.get('showRecurring') ?? this.viewOptions.showRecurring;
+			this.viewOptions.showTimeEntries = this.config.get('showTimeEntries') ?? this.viewOptions.showTimeEntries;
+			this.viewOptions.showTimeblocks = this.config.get('showTimeblocks') ?? this.viewOptions.showTimeblocks;
+			this.viewOptions.showPropertyBasedEvents = this.config.get('showPropertyBasedEvents') ?? this.viewOptions.showPropertyBasedEvents;
+
+			// ICS calendar toggles
+			if (this.plugin.icsSubscriptionService) {
+				const subscriptions = this.plugin.icsSubscriptionService.getSubscriptions();
+				for (const sub of subscriptions) {
+					const key = `showICS_${sub.id}`;
+					this.icsCalendarToggles.set(sub.id, this.config.get(key) ?? true);
+				}
+			}
+
+			// Google calendar toggles
+			if (this.plugin.googleCalendarService) {
+				const calendars = this.plugin.googleCalendarService.getAvailableCalendars();
+				for (const cal of calendars) {
+					const key = `showGoogleCalendar_${cal.id}`;
+					this.googleCalendarToggles.set(cal.id, this.config.get(key) ?? true);
+				}
+			}
+
+			// Microsoft calendar toggles
+			if (this.plugin.microsoftCalendarService) {
+				const calendars = this.plugin.microsoftCalendarService.getAvailableCalendars();
+				for (const cal of calendars) {
+					const key = `showMicrosoftCalendar_${cal.id}`;
+					this.microsoftCalendarToggles.set(cal.id, this.config.get(key) ?? true);
+				}
+			}
+		} catch (e) {
+			console.error("[TaskNotes][CalendarView] Error reading event toggles:", e);
+		}
+	}
+
+	/**
 	 * Read view configuration options from BasesViewConfig.
+	 * Layout options are only read once to avoid resetting the view on toggle changes.
 	 */
 	private readViewOptions(): void {
 		// Guard: config may not be set yet if called too early
@@ -271,13 +329,8 @@ export class CalendarView extends BasesViewBase {
 		}
 
 		try {
-			// Events
-			this.viewOptions.showScheduled = this.config.get('showScheduled') ?? this.viewOptions.showScheduled;
-			this.viewOptions.showDue = this.config.get('showDue') ?? this.viewOptions.showDue;
-			this.viewOptions.showRecurring = this.config.get('showRecurring') ?? this.viewOptions.showRecurring;
-			this.viewOptions.showTimeEntries = this.config.get('showTimeEntries') ?? this.viewOptions.showTimeEntries;
-			this.viewOptions.showTimeblocks = this.config.get('showTimeblocks') ?? this.viewOptions.showTimeblocks;
-			this.viewOptions.showPropertyBasedEvents = this.config.get('showPropertyBasedEvents') ?? this.viewOptions.showPropertyBasedEvents;
+			// Always read event toggles
+			this.readEventToggles();
 
 			// Date navigation
 			this.viewOptions.initialDate = this.config.get('initialDate') ?? this.viewOptions.initialDate;
@@ -320,38 +373,35 @@ export class CalendarView extends BasesViewBase {
 			this.viewOptions.selectMirror = this.config.get('selectMirror') ?? this.viewOptions.selectMirror;
 			this.viewOptions.timeFormat = this.config.get('timeFormat') ?? this.viewOptions.timeFormat;
 			this.viewOptions.eventMinHeight = this.config.get('eventMinHeight') ?? this.viewOptions.eventMinHeight;
+			this.viewOptions.slotEventOverlap = this.config.get('slotEventOverlap') ?? this.viewOptions.slotEventOverlap;
+
+			// Convert slider values: 0 means special behavior (null/true/false)
+			const eventMaxStackValue = this.config.get('eventMaxStack');
+			if (eventMaxStackValue !== undefined) {
+				this.viewOptions.eventMaxStack = eventMaxStackValue === 0 ? null : eventMaxStackValue;
+			}
+
+			const dayMaxEventsValue = this.config.get('dayMaxEvents');
+			if (dayMaxEventsValue !== undefined) {
+				// 0 = auto (true), positive number = limit
+				this.viewOptions.dayMaxEvents = dayMaxEventsValue === 0 ? true : dayMaxEventsValue;
+			}
+
+			const dayMaxEventRowsValue = this.config.get('dayMaxEventRows');
+			if (dayMaxEventRowsValue !== undefined) {
+				// 0 = unlimited (false), positive number = limit
+				this.viewOptions.dayMaxEventRows = dayMaxEventRowsValue === 0 ? false : dayMaxEventRowsValue;
+			}
 
 			// Property-based events
 			this.viewOptions.startDateProperty = this.config.get('startDateProperty') ?? this.viewOptions.startDateProperty;
 			this.viewOptions.endDateProperty = this.config.get('endDateProperty') ?? this.viewOptions.endDateProperty;
 			this.viewOptions.titleProperty = this.config.get('titleProperty') ?? this.viewOptions.titleProperty;
 
-			// ICS calendar toggles
-			if (this.plugin.icsSubscriptionService) {
-				const subscriptions = this.plugin.icsSubscriptionService.getSubscriptions();
-				for (const sub of subscriptions) {
-					const key = `showICS_${sub.id}`;
-					this.icsCalendarToggles.set(sub.id, this.config.get(key) ?? true);
-				}
-			}
+			// Read enableSearch toggle (default: false for backward compatibility)
+			const enableSearchValue = this.config.get('enableSearch');
+			this.enableSearch = (enableSearchValue as boolean) ?? false;
 
-			// Google calendar toggles
-			if (this.plugin.googleCalendarService) {
-				const calendars = this.plugin.googleCalendarService.getAvailableCalendars();
-				for (const cal of calendars) {
-					const key = `showGoogleCalendar_${cal.id}`;
-					this.googleCalendarToggles.set(cal.id, this.config.get(key) ?? true);
-				}
-			}
-
-			// Microsoft calendar toggles
-			if (this.plugin.microsoftCalendarService) {
-				const calendars = this.plugin.microsoftCalendarService.getAvailableCalendars();
-				for (const cal of calendars) {
-					const key = `showMicrosoftCalendar_${cal.id}`;
-					this.microsoftCalendarToggles.set(cal.id, this.config.get(key) ?? true);
-				}
-			}
 			// Mark config as successfully loaded
 			this.configLoaded = true;
 
@@ -371,13 +421,24 @@ export class CalendarView extends BasesViewBase {
 		// Ensure view options are read (in case config wasn't available in onload)
 		if (!this.configLoaded && this.config) {
 			this.readViewOptions();
+		} else if (this.config) {
+			// Always re-read event toggles to respond to toggle changes
+			this.readEventToggles();
+		}
+
+		// Now that config is loaded, setup search (idempotent: will only create once)
+		if (this.rootElement) {
+			this.setupSearch(this.rootElement);
 		}
 
 		try {
 			// Extract tasks from Bases
 			const dataItems = this.dataAdapter.extractDataItems();
 			const taskNotes = await identifyTaskNotesFromBasesData(dataItems, this.plugin);
-			this.currentTasks = taskNotes;
+
+			// Apply search filter
+			const filteredTasks = this.applySearchFilter(taskNotes);
+			this.currentTasks = filteredTasks;
 
 			// Build Bases entry mapping for task enrichment
 			this.basesEntryByPath.clear();
@@ -497,7 +558,9 @@ export class CalendarView extends BasesViewBase {
 			nowIndicator: this.viewOptions.nowIndicator,
 			weekends: this.viewOptions.showWeekends,
 			allDaySlot: this.viewOptions.showAllDaySlot,
-			dayMaxEvents: true,
+			dayMaxEvents: this.viewOptions.dayMaxEvents,
+			dayMaxEventRows: this.viewOptions.dayMaxEventRows,
+			eventMaxStack: this.viewOptions.eventMaxStack ?? undefined,
 			navLinks: true,
 			navLinkDayClick: (date: Date) => handleDateTitleClick(date, this.plugin),
 			editable: true,
@@ -515,6 +578,7 @@ export class CalendarView extends BasesViewBase {
 			},
 			scrollTime: this.viewOptions.scrollTime,
 			eventMinHeight: this.viewOptions.eventMinHeight,
+			slotEventOverlap: this.viewOptions.slotEventOverlap,
 			eventAllow: () => true, // Allow all drops to proceed visually
 			events: (fetchInfo, successCallback, failureCallback) => {
 				this.fetchEvents(fetchInfo, successCallback, failureCallback);

@@ -43,7 +43,7 @@ import { PomodoroStatsView } from "./views/PomodoroStatsView";
 import { StatsView } from "./views/StatsView";
 import { TaskCreationModal } from "./modals/TaskCreationModal";
 import { TaskEditModal } from "./modals/TaskEditModal";
-import { TaskSelectorModal } from "./modals/TaskSelectorModal";
+import { openTaskSelector } from "./modals/TaskSelectorWithCreateModal";
 import { TimeEntryEditorModal } from "./modals/TimeEntryEditorModal";
 import { PomodoroService } from "./services/PomodoroService";
 import { formatTime, getActiveTimeEntry } from "./utils/helpers";
@@ -170,6 +170,9 @@ export default class TaskNotesPlugin extends Plugin {
 	expandedProjectsService: ExpandedProjectsService;
 	autoArchiveService: AutoArchiveService;
 	viewPerformanceService: ViewPerformanceService;
+
+	// Task selection service for batch operations
+	taskSelectionService: import("./services/TaskSelectionService").TaskSelectionService;
 
 	// Editor services
 	taskLinkDetectionService?: import("./services/TaskLinkDetectionService").TaskLinkDetectionService;
@@ -350,6 +353,10 @@ export default class TaskNotesPlugin extends Plugin {
 		this.projectSubtasksService = new ProjectSubtasksService(this);
 		this.expandedProjectsService = new ExpandedProjectsService(this);
 		this.autoArchiveService = new AutoArchiveService(this);
+
+		// Initialize task selection service for batch operations
+		const { TaskSelectionService } = require("./services/TaskSelectionService");
+		this.taskSelectionService = new TaskSelectionService(this);
 		this.dragDropManager = new DragDropManager(this);
 		this.statusBarService = new StatusBarService(this);
 		this.notificationService = new NotificationService(this);
@@ -1582,6 +1589,13 @@ export default class TaskNotesPlugin extends Plugin {
 					await this.openTaskSelectorForTimeEntryEditor();
 				},
 			},
+			{
+				id: "create-or-open-task",
+				nameKey: "commands.createOrOpenTask",
+				callback: async () => {
+					await this.openTaskSelectorWithCreate();
+				},
+			},
 		];
 
 		this.registerCommands();
@@ -2122,6 +2136,23 @@ export default class TaskNotesPlugin extends Plugin {
 	}
 
 	/**
+	 * Open the task selector with create modal.
+	 * This modal allows users to either select an existing task or create a new one via NLP.
+	 */
+	async openTaskSelectorWithCreate(): Promise<void> {
+		const { openTaskSelectorWithCreate } = await import("./modals/TaskSelectorWithCreateModal");
+		const result = await openTaskSelectorWithCreate(this);
+
+		if (result.type === "selected" || result.type === "created") {
+			// Open the selected/created task
+			const file = this.app.vault.getAbstractFileByPath(result.task.path);
+			if (file instanceof TFile) {
+				await this.app.workspace.getLeaf(false).openFile(file);
+			}
+		}
+	}
+
+	/**
 	 * Apply a filter to show subtasks of a project
 	 */
 	async applyProjectSubtaskFilter(projectTask: TaskInfo): Promise<void> {
@@ -2408,7 +2439,7 @@ export default class TaskNotesPlugin extends Plugin {
 			const unarchivedTasks = allTasks.filter((task) => !task.archived);
 
 			// Open task selector modal
-			const modal = new TaskSelectorModal(this.app, this, unarchivedTasks, (selectedTask) => {
+			openTaskSelector(this, unarchivedTasks, (selectedTask) => {
 				if (selectedTask) {
 					// Create link using Obsidian's generateMarkdownLink (respects user's link format settings)
 					const file = this.app.vault.getAbstractFileByPath(selectedTask.path);
@@ -2437,8 +2468,6 @@ export default class TaskNotesPlugin extends Plugin {
 					}
 				}
 			});
-
-			modal.open();
 		} catch (error) {
 			console.error("Error inserting tasknote link:", error);
 			new Notice("Failed to insert tasknote link");
@@ -2466,7 +2495,7 @@ export default class TaskNotesPlugin extends Plugin {
 			}
 
 			// Open task selector modal
-			const modal = new TaskSelectorModal(this.app, this, availableTasks, async (selectedTask) => {
+			openTaskSelector(this, availableTasks, async (selectedTask) => {
 				if (selectedTask) {
 					try {
 						await this.startTimeTracking(selectedTask);
@@ -2481,8 +2510,6 @@ export default class TaskNotesPlugin extends Plugin {
 					}
 				}
 			});
-
-			modal.open();
 		} catch (error) {
 			console.error("Error opening task selector for time tracking:", error);
 			new Notice(this.i18n.translate("modals.timeTracking.startFailed"));
@@ -2509,13 +2536,11 @@ export default class TaskNotesPlugin extends Plugin {
 			}
 
 			// Open task selector modal
-			const modal = new TaskSelectorModal(this.app, this, tasksWithEntries, (selectedTask) => {
+			openTaskSelector(this, tasksWithEntries, (selectedTask) => {
 				if (selectedTask) {
 					this.openTimeEntryEditor(selectedTask);
 				}
 			});
-
-			modal.open();
 		} catch (error) {
 			console.error("Error opening task selector for time entry editor:", error);
 			new Notice(this.i18n.translate("modals.timeEntryEditor.openFailed"));

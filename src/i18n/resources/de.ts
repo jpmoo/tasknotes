@@ -229,6 +229,11 @@ export const de: TranslationTree = {
 					initialScrollTime: "Anfangsscrollzeit",
 					initialScrollTimePlaceholder: "HH:mm:ss (z.B. 08:00:00)",
 					minimumEventHeight: "Minimale Ereignishöhe (px)",
+					slotEventOverlap: "Ereignisüberlappung zulassen",
+					enableSearch: "Suchfeld aktivieren",
+					eventMaxStack: "Max. gestapelte Ereignisse (Wochen-/Tagesansicht, 0 = unbegrenzt)",
+					dayMaxEvents: "Max. Ereignisse pro Tag (Monatsansicht, 0 = automatisch)",
+					dayMaxEventRows: "Max. Ereigniszeilen pro Tag (Monatsansicht, 0 = unbegrenzt)",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Startdatumseigenschaft",
@@ -804,6 +809,7 @@ export const de: TranslationTree = {
 					value: "Wert: Der interne Bezeichner, der in deinen Aufgabendateien gespeichert wird (z.B. \"in-progress\")",
 					label: "Label: Der Anzeigename in der Benutzeroberfläche (z.B. \"In Bearbeitung\")",
 					color: "Farbe: Visuelle Indikatorfarbe für Statuspunkt und Abzeichen",
+					icon: "Symbol: Optionaler Lucide-Symbolname zur Anzeige anstelle des farbigen Punktes (z.B. \"check\", \"circle\", \"clock\"). Symbole unter lucide.dev durchsuchen",
 					completed: "Abgeschlossen: Wenn angehakt, werden Aufgaben mit diesem Status als fertig betrachtet und können anders gefiltert werden",
 					autoArchive: "Auto-Archivierung: Wenn aktiviert, werden Aufgaben nach der angegebenen Verzögerung automatisch archiviert (1-1440 Minuten)",
 					orderNote: "Die Reihenfolge unten bestimmt die Sequenz beim Durchschalten der Status durch Klicken auf Aufgabenstatus-Abzeichen.",
@@ -820,6 +826,7 @@ export const de: TranslationTree = {
 					value: "Wert:",
 					label: "Label:",
 					color: "Farbe:",
+					icon: "Symbol:",
 					completed: "Abgeschlossen:",
 					autoArchive: "Auto-Archivierung:",
 					delayMinutes: "Verzögerung (Minuten):",
@@ -827,6 +834,7 @@ export const de: TranslationTree = {
 				placeholders: {
 					value: "in-bearbeitung",
 					label: "In Bearbeitung",
+					icon: "check, circle, clock",
 				},
 				badges: {
 					completed: "Abgeschlossen",
@@ -1061,6 +1069,7 @@ export const de: TranslationTree = {
 					name: "Kalendersprache",
 					description: "Kalendersprache für Datumsformatierung und Kalendersystem (z.B. \"en\", \"fa\" für Farsi/Persisch, \"de\" für Deutsch). Leer lassen für automatische Erkennung vom Browser.",
 					placeholder: "Automatische Erkennung",
+					invalidLocale: "Ungültige Gebietsschema-Einstellung. Bitte geben Sie ein gültiges Sprachkürzel ein (z.B. 'de', 'en', 'fr-FR').",
 				},
 			},
 			defaultEventVisibility: {
@@ -1269,8 +1278,11 @@ export const de: TranslationTree = {
 					description: "TaskNotes-Ansichten zur Verwendung im Obsidian Bases Plugin aktivieren. Bases Plugin muss aktiviert sein, damit dies funktioniert.",
 				},
 				viewCommands: {
-					header: "Ansichtsbefehle",
-					description: "Konfiguriere, welche .base-Dateien von Ansichtsbefehlen geöffnet werden. Diese Befehle ermöglichen es dir, vertraute Verknüpfungen zu verwenden, während du mit Bases-Dateien arbeitest.",
+					header: "Ansichten & Base-Dateien",
+					description: "TaskNotes verwendet Obsidian Bases-Dateien (.base) zur Darstellung seiner Ansichten. Diese Dateien werden beim Start automatisch erstellt, falls sie nicht existieren, und mit deinen aktuellen Einstellungen konfiguriert (Aufgabenidentifikation, Feldzuordnungen, Status usw.).",
+					descriptionRegen: "Base-Dateien werden nicht automatisch aktualisiert, wenn du Einstellungen änderst. Um neue Einstellungen anzuwenden, lösche die vorhandenen .base-Dateien und starte Obsidian neu, verwende \"Dateien erstellen\" unten, oder bearbeite sie manuell.",
+					docsLink: "Dokumentation für verfügbare Formeln und Anpassungsoptionen anzeigen",
+					docsLinkUrl: "https://tasknotes.dev/views/default-base-templates",
 					commands: {
 						miniCalendar: "Mini-Kalenderansicht öffnen",
 						kanban: "Kanban-Ansicht öffnen",
@@ -1717,6 +1729,7 @@ export const de: TranslationTree = {
 		viewReleaseNotes: "Versionshinweise anzeigen",
 		startTimeTrackingWithSelector: "Zeiterfassung starten (Aufgabe auswählen)",
 		editTimeEntries: "Zeiteinträge bearbeiten (Aufgabe auswählen)",
+		createOrOpenTask: "Aufgabe erstellen oder öffnen",
 	},
 	modals: {
 		deviceCode: {
@@ -1887,6 +1900,13 @@ export const de: TranslationTree = {
 			tagsPlaceholder: "tag1, tag2",
 			timeEstimateLabel: "Zeitschätzung (Minuten)",
 			timeEstimatePlaceholder: "30",
+			unsavedChanges: {
+				title: "Ungespeicherte Änderungen",
+				message: "Sie haben ungespeicherte Änderungen. Möchten Sie diese speichern?",
+				save: "Änderungen speichern",
+				discard: "Änderungen verwerfen",
+				cancel: "Weiter bearbeiten",
+			},
 			dependencies: {
 				blockedBy: "Blockiert von",
 				blocking: "Blockierend",
@@ -1974,6 +1994,20 @@ export const de: TranslationTree = {
 			dueDate: {
 				overdue: "Fällig: {date} (überfällig)",
 				today: "Fällig: Heute",
+			},
+		},
+		taskSelectorWithCreate: {
+			title: "Aufgabe erstellen oder öffnen",
+			placeholder: "Aufgaben suchen oder eingeben zum Erstellen...",
+			instructions: {
+				create: "um neue Aufgabe zu erstellen",
+			},
+			footer: {
+				createLabel: " zum Erstellen: ",
+			},
+			notices: {
+				emptyQuery: "Bitte geben Sie eine Aufgabenbeschreibung ein",
+				invalidTitle: "Kein gültiger Aufgabentitel erkannt",
 			},
 		},
 		taskCreation: {

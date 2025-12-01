@@ -22,6 +22,8 @@ import {
 	createCardToggle,
 } from "../components/CardComponent";
 import { createFilterSettingsInputs } from "../components/FilterSettingsComponent";
+import { initializeFieldConfig } from "../../utils/fieldConfigDefaults";
+import { createIconInput } from "../components/IconSuggest";
 
 /**
  * Renders the Task Properties tab - custom statuses, priorities, and user fields
@@ -59,6 +61,9 @@ export function renderTaskPropertiesTab(
 	});
 	statusHelpList.createEl("li", {
 		text: translate("settings.taskProperties.taskStatuses.howTheyWork.color"),
+	});
+	statusHelpList.createEl("li", {
+		text: translate("settings.taskProperties.taskStatuses.howTheyWork.icon"),
 	});
 	statusHelpList.createEl("li", {
 		text: translate("settings.taskProperties.taskStatuses.howTheyWork.completed"),
@@ -141,12 +146,17 @@ export function renderTaskPropertiesTab(
 				)
 				.onClick(async () => {
 					const newId = `priority_${Date.now()}`;
+					// Set weight to max + 1 so new priority appears at the end (highest priority)
+					const maxWeight = plugin.settings.customPriorities.reduce(
+						(max, p) => Math.max(max, p.weight),
+						-1
+					);
 					const newPriority = {
 						id: newId,
 						value: "",
 						label: "",
 						color: "#6366f1",
-						weight: 1,
+						weight: maxWeight + 1,
 					};
 					plugin.settings.customPriorities.push(newPriority);
 					save();
@@ -235,6 +245,34 @@ export function renderTaskPropertiesTab(
 						type: "text" as const,
 					};
 					plugin.settings.userFields.push(newField);
+
+					// Also add to modal fields config so it appears in task modals by default
+					if (!plugin.settings.modalFieldsConfig) {
+						plugin.settings.modalFieldsConfig = initializeFieldConfig(
+							undefined,
+							plugin.settings.userFields
+						);
+					} else {
+						// Add the new field to the custom group
+						const customGroupFields = plugin.settings.modalFieldsConfig.fields.filter(
+							(f) => f.group === "custom"
+						);
+						const maxOrder = customGroupFields.length > 0
+							? Math.max(...customGroupFields.map((f) => f.order))
+							: -1;
+
+						plugin.settings.modalFieldsConfig.fields.push({
+							id: newId,
+							fieldType: "user",
+							group: "custom",
+							displayName: newField.displayName || "",
+							visibleInCreation: true,
+							visibleInEdit: true,
+							order: maxOrder + 1,
+							enabled: true,
+						});
+					}
+
 					save();
 					renderUserFieldsList(userFieldsContainer, plugin, save);
 				})
@@ -278,6 +316,11 @@ function renderStatusList(container: HTMLElement, plugin: TaskNotesPlugin, save:
 			status.label
 		);
 		const colorInput = createCardInput("color", "", status.color);
+		const { container: iconInputContainer, input: iconInput } = createIconInput(
+			plugin.app,
+			translate("settings.taskProperties.taskStatuses.placeholders.icon"),
+			status.icon || ""
+		);
 
 		const completedToggle = createCardToggle(status.isCompleted || false, (value) => {
 			status.isCompleted = value;
@@ -390,6 +433,12 @@ function renderStatusList(container: HTMLElement, plugin: TaskNotesPlugin, save:
 							},
 							{
 								label: translate(
+									"settings.taskProperties.taskStatuses.fields.icon"
+								),
+								input: iconInputContainer,
+							},
+							{
+								label: translate(
 									"settings.taskProperties.taskStatuses.fields.completed"
 								),
 								input: completedToggle,
@@ -439,6 +488,11 @@ function renderStatusList(container: HTMLElement, plugin: TaskNotesPlugin, save:
 			if (colorIndicator) {
 				colorIndicator.style.backgroundColor = status.color;
 			}
+			save();
+		});
+
+		iconInput.addEventListener("change", () => {
+			status.icon = iconInput.value.trim() || undefined;
 			save();
 		});
 
@@ -504,8 +558,9 @@ function renderPriorityList(
 		return;
 	}
 
-	const sortedPriorities = [...plugin.settings.customPriorities].sort((a, b) =>
-		a.value.localeCompare(b.value)
+	// Sort by weight (lowest first = lowest priority at top, highest at bottom)
+	const sortedPriorities = [...plugin.settings.customPriorities].sort(
+		(a, b) => a.weight - b.weight
 	);
 
 	sortedPriorities.forEach((priority, index) => {
@@ -523,6 +578,7 @@ function renderPriorityList(
 
 		const card = createCard(container, {
 			id: priority.id,
+			draggable: true,
 			collapsible: true,
 			defaultCollapsed: true,
 			colorIndicator: { color: priority.color },
@@ -536,9 +592,20 @@ function renderPriorityList(
 							);
 							return;
 						}
-						plugin.settings.customPriorities.splice(index, 1);
-						save();
-						renderPriorityList(container, plugin, save);
+						const priorityIndex = plugin.settings.customPriorities.findIndex(
+							(p) => p.id === priority.id
+						);
+						if (priorityIndex !== -1) {
+							plugin.settings.customPriorities.splice(priorityIndex, 1);
+							// Recalculate weights to keep them sequential
+							plugin.settings.customPriorities
+								.sort((a, b) => a.weight - b.weight)
+								.forEach((p, i) => {
+									p.weight = i;
+								});
+							save();
+							renderPriorityList(container, plugin, save);
+						}
 					}, translate("settings.taskProperties.taskPriorities.deleteTooltip")),
 				],
 			},
@@ -591,6 +658,46 @@ function renderPriorityList(
 				colorIndicator.style.backgroundColor = priority.color;
 			}
 			save();
+		});
+
+		// Setup drag and drop for reordering
+		setupCardDragAndDrop(card, container, (draggedId, targetId, insertBefore) => {
+			const draggedIndex = plugin.settings.customPriorities.findIndex(
+				(p) => p.id === draggedId
+			);
+			const targetIndex = plugin.settings.customPriorities.findIndex(
+				(p) => p.id === targetId
+			);
+
+			if (draggedIndex === -1 || targetIndex === -1) return;
+
+			// Sort by weight first to work with the visual order
+			const reorderedPriorities = [...plugin.settings.customPriorities].sort(
+				(a, b) => a.weight - b.weight
+			);
+			const draggedPriorityIndex = reorderedPriorities.findIndex(
+				(p) => p.id === draggedId
+			);
+			const targetPriorityIndex = reorderedPriorities.findIndex(
+				(p) => p.id === targetId
+			);
+
+			const [draggedPriority] = reorderedPriorities.splice(draggedPriorityIndex, 1);
+
+			let newIndex = targetPriorityIndex;
+			if (draggedPriorityIndex < targetPriorityIndex) newIndex = targetPriorityIndex - 1;
+			if (!insertBefore) newIndex++;
+
+			reorderedPriorities.splice(newIndex, 0, draggedPriority);
+
+			// Update weights based on new order
+			reorderedPriorities.forEach((p, i) => {
+				p.weight = i;
+			});
+
+			plugin.settings.customPriorities = reorderedPriorities;
+			save();
+			renderPriorityList(container, plugin, save);
 		});
 	});
 }
@@ -744,6 +851,17 @@ function renderUserFieldsList(
 
 		nameInput.addEventListener("change", () => {
 			field.displayName = nameInput.value;
+
+			// Also update display name in modal fields config
+			if (plugin.settings.modalFieldsConfig) {
+				const modalField = plugin.settings.modalFieldsConfig.fields.find(
+					(f) => f.id === field.id
+				);
+				if (modalField) {
+					modalField.displayName = field.displayName;
+				}
+			}
+
 			save();
 			renderUserFieldsList(container, plugin, save);
 		});
@@ -856,7 +974,17 @@ function renderUserFieldsList(
 				actions: [
 					createDeleteHeaderButton(() => {
 						if (plugin.settings.userFields) {
+							const fieldId = plugin.settings.userFields[index]?.id;
 							plugin.settings.userFields.splice(index, 1);
+
+							// Also remove from modal fields config
+							if (plugin.settings.modalFieldsConfig && fieldId) {
+								plugin.settings.modalFieldsConfig.fields =
+									plugin.settings.modalFieldsConfig.fields.filter(
+										(f) => f.id !== fieldId
+									);
+							}
+
 							save();
 							renderUserFieldsList(container, plugin, save);
 						}

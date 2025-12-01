@@ -11,12 +11,12 @@ import { DateContextMenu } from "../components/DateContextMenu";
 import { PriorityContextMenu } from "../components/PriorityContextMenu";
 import { RecurrenceContextMenu } from "../components/RecurrenceContextMenu";
 import { ReminderModal } from "../modals/ReminderModal";
-import { getDatePart, getTimePart } from "../utils/dateUtils";
+import { getDatePart, getTimePart, parseDateToUTC, createUTCDateFromLocalCalendarDate } from "../utils/dateUtils";
 import { VirtualScroller } from "../utils/VirtualScroller";
-import { parseDateToUTC } from "../utils/dateUtils";
 
 export class TaskListView extends BasesViewBase {
 	type = "tasknoteTaskList";
+
 	private itemsContainer: HTMLElement | null = null;
 	private currentTaskElements = new Map<string, HTMLElement>();
 	private lastRenderWasGrouped = false;
@@ -24,7 +24,7 @@ export class TaskListView extends BasesViewBase {
 	private lastTaskSignatures = new Map<string, string>();
 	private taskInfoCache = new Map<string, TaskInfo>();
 	private clickTimeouts = new Map<string, number>();
-	private currentTargetDate = new Date();
+	private currentTargetDate = createUTCDateFromLocalCalendarDate(new Date());
 	private containerListenersRegistered = false;
 	private virtualScroller: VirtualScroller<any> | null = null; // Can render TaskInfo or group headers
 	private useVirtualScrolling = false;
@@ -32,6 +32,7 @@ export class TaskListView extends BasesViewBase {
 	private collapsedSubGroups = new Set<string>(); // Track collapsed sub-group keys
 	private subGroupPropertyId: string | null = null; // Property ID for sub-grouping
 	private configLoaded = false; // Track if we've successfully loaded config
+
 	/**
 	 * Threshold for enabling virtual scrolling in task list view.
 	 * Virtual scrolling activates when total items (tasks + group headers) >= 100.
@@ -64,11 +65,15 @@ export class TaskListView extends BasesViewBase {
 	private readViewOptions(): void {
 		// Guard: config may not be set yet if called too early
 		if (!this.config || typeof this.config.get !== 'function') {
+			console.debug('[TaskListView] Config not available yet in readViewOptions');
 			return;
 		}
 
 		try {
 			this.subGroupPropertyId = this.config.getAsPropertyId('subGroup');
+			// Read enableSearch toggle (default: false for backward compatibility)
+			const enableSearchValue = this.config.get('enableSearch');
+			this.enableSearch = (enableSearchValue as boolean) ?? false;
 			// Mark config as successfully loaded
 			this.configLoaded = true;
 		} catch (e) {
@@ -103,6 +108,11 @@ export class TaskListView extends BasesViewBase {
 		// Ensure view options are read (in case config wasn't available in onload)
 		if (!this.configLoaded && this.config) {
 			this.readViewOptions();
+		}
+
+		// Now that config is loaded, setup search (idempotent: will only create once)
+		if (this.rootElement) {
+			this.setupSearch(this.rootElement);
 		}
 
 		try {
@@ -211,16 +221,28 @@ export class TaskListView extends BasesViewBase {
 	private async renderFlat(taskNotes: TaskInfo[]): Promise<void> {
 		const visibleProperties = this.getVisibleProperties();
 
+		// Apply search filter
+		const filteredTasks = this.applySearchFilter(taskNotes);
+
+		// Show "no results" if search returned empty but we had tasks
+		if (this.isSearchWithNoResults(filteredTasks, taskNotes.length)) {
+			this.clearAllTaskElements();
+			if (this.itemsContainer) {
+				this.renderSearchNoResults(this.itemsContainer);
+			}
+			return;
+		}
+
 		// Note: taskNotes are already sorted by Bases according to sort configuration
 		// No manual sorting needed - Bases provides pre-sorted data
 
-		const targetDate = new Date();
+		const targetDate = createUTCDateFromLocalCalendarDate(new Date());
 		this.currentTargetDate = targetDate;
 
 		const cardOptions = this.getCardOptions(targetDate);
 
-		// Decide whether to use virtual scrolling
-		const shouldUseVirtualScrolling = taskNotes.length >= this.VIRTUAL_SCROLL_THRESHOLD;
+		// Decide whether to use virtual scrolling based on filtered task count
+		const shouldUseVirtualScrolling = filteredTasks.length >= this.VIRTUAL_SCROLL_THRESHOLD;
 
 		if (shouldUseVirtualScrolling && !this.useVirtualScrolling) {
 			// Switch to virtual scrolling
@@ -233,9 +255,9 @@ export class TaskListView extends BasesViewBase {
 		}
 
 		if (this.useVirtualScrolling) {
-			await this.renderFlatVirtual(taskNotes, visibleProperties, cardOptions);
+			await this.renderFlatVirtual(filteredTasks, visibleProperties, cardOptions);
 		} else {
-			await this.renderFlatNormal(taskNotes, visibleProperties, cardOptions);
+			await this.renderFlatNormal(filteredTasks, visibleProperties, cardOptions);
 		}
 	}
 
@@ -362,6 +384,10 @@ export class TaskListView extends BasesViewBase {
 			const primaryKey = this.dataAdapter.convertGroupKeyToString(group.key);
 			const groupPaths = new Set(group.entries.map((e: any) => e.file.path));
 			const groupTasks = taskNotes.filter((t) => groupPaths.has(t.path));
+
+			// Skip groups with no matching tasks (e.g., after search filtering)
+			if (groupTasks.length === 0) continue;
+
 			const isPrimaryCollapsed = this.collapsedGroups.has(primaryKey);
 
 			// Add primary header
@@ -423,13 +449,26 @@ export class TaskListView extends BasesViewBase {
 	 */
 	private async renderGroupedBySubProperty(taskNotes: TaskInfo[]): Promise<void> {
 		const visibleProperties = this.getVisibleProperties();
-		const targetDate = new Date();
+
+		// Apply search filter
+		const filteredTasks = this.applySearchFilter(taskNotes);
+
+		// Show "no results" if search returned empty but we had tasks
+		if (this.isSearchWithNoResults(filteredTasks, taskNotes.length)) {
+			this.clearAllTaskElements();
+			if (this.itemsContainer) {
+				this.renderSearchNoResults(this.itemsContainer);
+			}
+			return;
+		}
+
+		const targetDate = createUTCDateFromLocalCalendarDate(new Date());
 		this.currentTargetDate = targetDate;
 		const cardOptions = this.getCardOptions(targetDate);
 
 		// Group tasks by sub-property
 		const pathToProps = this.buildPathToPropsMap();
-		const groupedTasks = this.groupTasksBySubProperty(taskNotes, this.subGroupPropertyId!, pathToProps);
+		const groupedTasks = this.groupTasksBySubProperty(filteredTasks, this.subGroupPropertyId!, pathToProps);
 
 		// Build flat items array (treat sub-groups as primary groups)
 		type RenderItem =
@@ -497,12 +536,24 @@ export class TaskListView extends BasesViewBase {
 		const visibleProperties = this.getVisibleProperties();
 		const groups = this.dataAdapter.getGroupedData();
 
-		const targetDate = new Date();
+		// Apply search filter
+		const filteredTasks = this.applySearchFilter(taskNotes);
+
+		// Show "no results" if search returned empty but we had tasks
+		if (this.isSearchWithNoResults(filteredTasks, taskNotes.length)) {
+			this.clearAllTaskElements();
+			if (this.itemsContainer) {
+				this.renderSearchNoResults(this.itemsContainer);
+			}
+			return;
+		}
+
+		const targetDate = createUTCDateFromLocalCalendarDate(new Date());
 		this.currentTargetDate = targetDate;
 		const cardOptions = this.getCardOptions(targetDate);
 
 		// Build flattened list of items using shared method
-		const items = this.buildGroupedRenderItems(groups, taskNotes);
+		const items = this.buildGroupedRenderItems(groups, filteredTasks);
 
 		// Use virtual scrolling if we have many items
 		const shouldUseVirtualScrolling = items.length >= this.VIRTUAL_SCROLL_THRESHOLD;
@@ -718,10 +769,11 @@ export class TaskListView extends BasesViewBase {
 	 * Override from Component base class.
 	 */
 	onunload(): void {
-		// Component.register() calls will be automatically cleaned up
+		// Component.register() calls will be automatically cleaned up (including search cleanup)
 		// We just need to clean up view-specific state
 		this.unregisterContainerListeners();
 		this.destroyVirtualScroller();
+
 		this.currentTaskElements.clear();
 		this.itemsContainer = null;
 		this.lastRenderWasGrouped = false;
@@ -906,6 +958,18 @@ export class TaskListView extends BasesViewBase {
 		if (!context) return;
 		event.preventDefault();
 		event.stopPropagation();
+
+		// If multiple tasks are selected, show batch context menu
+		const selectionService = this.plugin.taskSelectionService;
+		if (selectionService && selectionService.getSelectionCount() > 1) {
+			// Ensure the right-clicked task is in the selection
+			if (!selectionService.isSelected(context.task.path)) {
+				selectionService.addToSelection(context.task.path);
+			}
+			this.showBatchContextMenu(event);
+			return;
+		}
+
 		await showTaskContextMenu(event, context.task.path, this.plugin, this.currentTargetDate);
 	};
 
@@ -1098,12 +1162,17 @@ export class TaskListView extends BasesViewBase {
 				}
 			},
 			plugin: this.plugin,
-			app: this.app,
+			app: this.app || this.plugin.app,
 		});
 		menu.show(event);
 	}
 
 	private async handleCardClick(task: TaskInfo, event: MouseEvent): Promise<void> {
+		// Check if this is a selection click (shift/ctrl/cmd or in selection mode)
+		if (this.handleSelectionClick(event, task.path)) {
+			return;
+		}
+
 		if (this.plugin.settings.doubleClickAction === "none") {
 			await this.executeSingleClickAction(task, event);
 			return;
@@ -1246,6 +1315,7 @@ export class TaskListView extends BasesViewBase {
 	/**
 	 * Build a map of task path -> properties for fast lookup during grouping.
 	 * Similar to KanbanView's pattern for swimlane grouping.
+	 * Includes both regular properties and formula results.
 	 */
 	private buildPathToPropsMap(): Map<string, Record<string, any>> {
 		const map = new Map<string, Record<string, any>>();
@@ -1254,7 +1324,19 @@ export class TaskListView extends BasesViewBase {
 		const dataItems = this.dataAdapter.extractDataItems();
 		for (const item of dataItems) {
 			if (item.path) {
-				map.set(item.path, item.properties || {});
+				// Merge regular properties with formula results
+				const props = { ...(item.properties || {}) };
+
+				// Add formula results if available
+				const formulaOutputs = item.basesData?.formulaResults?.cachedFormulaOutputs;
+				if (formulaOutputs && typeof formulaOutputs === 'object') {
+					for (const [formulaName, value] of Object.entries(formulaOutputs)) {
+						// Store with formula. prefix for easy lookup
+						props[`formula.${formulaName}`] = value;
+					}
+				}
+
+				map.set(item.path, props);
 			}
 		}
 		return map;
@@ -1262,10 +1344,15 @@ export class TaskListView extends BasesViewBase {
 
 	/**
 	 * Get property value from properties object using property ID.
-	 * Handles both TaskInfo properties and Bases property IDs (note.*, task.*).
+	 * Handles TaskInfo properties, Bases property IDs (note.*, task.*, file.*), and formulas (formula.*).
 	 */
 	private getPropertyValue(props: Record<string, any>, propertyId: string): any {
 		if (!propertyId) return null;
+
+		// Formula properties are stored with their full prefix (formula.NAME)
+		if (propertyId.startsWith('formula.')) {
+			return props[propertyId] ?? null;
+		}
 
 		// Strip prefix (note., task., file.) from property ID
 		const cleanPropertyId = propertyId.replace(/^(note\.|task\.|file\.)/, '');
@@ -1276,11 +1363,33 @@ export class TaskListView extends BasesViewBase {
 
 	/**
 	 * Convert a property value to a display string for grouping.
-	 * Handles null, undefined, arrays, objects, primitives.
+	 * Handles null, undefined, arrays, objects, primitives, and Bases Value objects.
 	 */
 	private valueToString(value: any): string {
 		if (value === null || value === undefined) {
 			return "None";
+		}
+
+		// Handle Bases Value objects (they have a toString() method and often a type property)
+		// Check for Bases Value object by duck-typing (has toString and is an object with constructor)
+		if (typeof value === "object" && value !== null && typeof value.toString === "function") {
+			// Check if it's a Bases NullValue
+			if (value.constructor?.name === "NullValue" || (value.isTruthy && !value.isTruthy())) {
+				return "None";
+			}
+
+			// Check if it's a Bases ListValue (array-like)
+			if (value.constructor?.name === "ListValue" || (Array.isArray(value.value))) {
+				const arr = value.value || [];
+				if (arr.length === 0) return "None";
+				// Recursively convert each item
+				return arr.map((v: any) => this.valueToString(v)).join(", ");
+			}
+
+			// For other Bases Value types (StringValue, NumberValue, BooleanValue, DateValue, etc.)
+			// Use their toString() method
+			const str = value.toString();
+			return str || "None";
 		}
 
 		if (typeof value === "string") {
@@ -1296,7 +1405,7 @@ export class TaskListView extends BasesViewBase {
 		}
 
 		if (Array.isArray(value)) {
-			return value.length > 0 ? value.join(", ") : "None";
+			return value.length > 0 ? value.map((v) => this.valueToString(v)).join(", ") : "None";
 		}
 
 		return String(value);
