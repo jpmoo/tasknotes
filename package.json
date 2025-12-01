@@ -1,5 +1,5 @@
 {
-	"name": "tasknotes",
+	"name": "tasknotes-fork",
 	"version": "4.1.1",
 	"description": "Note-based task management with calendar, pomodoro and time-tracking integration.",
 	"main": "main.js",

@@ -26,6 +26,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private readonly QUADRANT_FIXED_HEIGHT = 275; // pixels
 	private draggedTaskPath: string | null = null;
+	private draggedFromQuadrant: Quadrant | null = null;
+	private quadrantOrderings: Map<Quadrant, Map<string, number>> = new Map();
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -75,15 +77,39 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				return;
 			}
 
+			// Load quadrant orderings from config
+			this.loadQuadrantOrderings();
+
 			// Categorize tasks into quadrants
 			const quadrants = this.categorizeTasks(taskNotes);
 
+			// Apply custom ordering to each quadrant's tasks
+			this.applyOrderingToQuadrants(quadrants);
+
 			// Render each quadrant - top row: Important quadrants, bottom row: Not Important quadrants
-			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO");
-			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE");
-			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE");
-			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER");
-			// Render uncategorized region (spans full width below the matrix)
+			// First render with auto height to measure content
+			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO", true);
+			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE", true);
+			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE", true);
+			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER", true);
+			
+			// Wait for DOM to render, then calculate and apply heights
+			// Pass task counts to handle virtual scrolling cases
+			const taskCounts = {
+				"urgent-important": quadrants.urgentImportant.length,
+				"not-urgent-important": quadrants.notUrgentImportant.length,
+				"urgent-not-important": quadrants.urgentNotImportant.length,
+				"not-urgent-not-important": quadrants.notUrgentNotImportant.length,
+			};
+			
+			// Use requestAnimationFrame to ensure DOM is fully rendered before measuring
+			requestAnimationFrame(() => {
+				const maxHeight = this.calculateMaxQuadrantHeight(taskCounts);
+				// Apply the maximum height to all four quadrants
+				this.applyUniformHeightToQuadrants(maxHeight);
+			});
+			
+			// Render uncategorized region (spans full width below the matrix) - fixed height
 			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized");
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
@@ -148,6 +174,76 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
+	 * Load quadrant orderings from BasesViewConfig
+	 */
+	private loadQuadrantOrderings(): void {
+		this.quadrantOrderings.clear();
+		
+		try {
+			const orderingsJson = this.config?.get?.('quadrantOrderings');
+			if (orderingsJson && typeof orderingsJson === 'string') {
+				const orderings = JSON.parse(orderingsJson);
+				for (const [quadrantId, taskOrderMap] of Object.entries(orderings)) {
+					if (typeof taskOrderMap === 'object' && taskOrderMap !== null) {
+						this.quadrantOrderings.set(
+							quadrantId as Quadrant,
+							new Map(Object.entries(taskOrderMap as Record<string, number>))
+						);
+					}
+				}
+			}
+		} catch (error) {
+			console.error('[EisenhowerMatrixView] Failed to load quadrant orderings:', error);
+		}
+	}
+
+	/**
+	 * Save quadrant orderings to BasesViewConfig
+	 */
+	private saveQuadrantOrderings(): void {
+		try {
+			const orderings: Record<string, Record<string, number>> = {};
+			for (const [quadrantId, taskOrderMap] of this.quadrantOrderings.entries()) {
+				orderings[quadrantId] = Object.fromEntries(taskOrderMap);
+			}
+			const orderingsJson = JSON.stringify(orderings);
+			this.config?.set?.('quadrantOrderings', orderingsJson);
+		} catch (error) {
+			console.error('[EisenhowerMatrixView] Failed to save quadrant orderings:', error);
+		}
+	}
+
+	/**
+	 * Apply custom ordering to tasks in each quadrant
+	 */
+	private applyOrderingToQuadrants(quadrants: {
+		urgentImportant: TaskInfo[];
+		urgentNotImportant: TaskInfo[];
+		notUrgentImportant: TaskInfo[];
+		notUrgentNotImportant: TaskInfo[];
+		holdingPen: TaskInfo[];
+	}): void {
+		const quadrantMap: Record<string, TaskInfo[]> = {
+			'urgent-important': quadrants.urgentImportant,
+			'not-urgent-important': quadrants.notUrgentImportant,
+			'urgent-not-important': quadrants.urgentNotImportant,
+			'not-urgent-not-important': quadrants.notUrgentNotImportant,
+		};
+
+		for (const [quadrantId, tasks] of Object.entries(quadrantMap)) {
+			const ordering = this.quadrantOrderings.get(quadrantId as Quadrant);
+			if (ordering && ordering.size > 0) {
+				// Sort tasks by their stored order, with un-ordered tasks at the end
+				tasks.sort((a, b) => {
+					const orderA = ordering.get(a.path) ?? Infinity;
+					const orderB = ordering.get(b.path) ?? Infinity;
+					return orderA - orderB;
+				});
+			}
+		}
+	}
+
+	/**
 	 * Check if a task has a specific tag
 	 */
 	private hasTag(task: TaskInfo, tag: string): boolean {
@@ -163,15 +259,125 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
+	 * Calculate the maximum content height needed across all four quadrants
+	 */
+	private calculateMaxQuadrantHeight(taskCounts: Record<string, number>): number {
+		const headerHeight = 50; // Approximate header height
+		const quadrantIds: Quadrant[] = [
+			"urgent-important",
+			"not-urgent-important",
+			"urgent-not-important",
+			"not-urgent-not-important"
+		];
+		
+		// Approximate height per task card: ~45px card + 8px gap = ~53px
+		const estimatedCardHeight = 53;
+		
+		let maxContentHeight = 0;
+		
+		for (const quadrantId of quadrantIds) {
+			const taskCount = taskCounts[quadrantId] || 0;
+			const usesVirtualScrolling = taskCount >= this.VIRTUAL_SCROLL_THRESHOLD;
+			
+			if (usesVirtualScrolling) {
+				// For virtual scrolling, estimate height based on task count
+				// Add padding (8px top + 8px bottom = 16px)
+				const estimatedHeight = (taskCount * estimatedCardHeight) + 16;
+				maxContentHeight = Math.max(maxContentHeight, estimatedHeight);
+			} else {
+				// For normal rendering, measure actual content height
+				const quadrant = this.matrixContainer?.querySelector(
+					`.eisenhower-matrix__quadrant--${quadrantId}`
+				) as HTMLElement;
+				
+				if (quadrant) {
+					const tasksContainer = quadrant.querySelector(
+						".eisenhower-matrix__quadrant-tasks"
+					) as HTMLElement;
+					
+					if (tasksContainer) {
+						// Temporarily set overflow to visible to measure full content height
+						const originalOverflow = tasksContainer.style.overflowY;
+						tasksContainer.style.overflowY = "visible";
+						
+						// Measure the scroll height (full content height)
+						const contentHeight = tasksContainer.scrollHeight;
+						maxContentHeight = Math.max(maxContentHeight, contentHeight);
+						
+						// Restore original overflow
+						tasksContainer.style.overflowY = originalOverflow;
+					}
+				}
+			}
+		}
+		
+		// Ensure minimum height (at least show a few tasks)
+		const minContentHeight = (3 * estimatedCardHeight) + 16; // 3 tasks minimum
+		maxContentHeight = Math.max(maxContentHeight, minContentHeight);
+		
+		// Return total height: content + header
+		return maxContentHeight + headerHeight;
+	}
+	
+	/**
+	 * Apply uniform height to all four quadrants
+	 */
+	private applyUniformHeightToQuadrants(height: number): void {
+		const quadrantIds: Quadrant[] = [
+			"urgent-important",
+			"not-urgent-important",
+			"urgent-not-important",
+			"not-urgent-not-important"
+		];
+		
+		const headerHeight = 50;
+		const tasksContainerHeight = height - headerHeight;
+		
+		for (const quadrantId of quadrantIds) {
+			const quadrant = this.matrixContainer?.querySelector(
+				`.eisenhower-matrix__quadrant--${quadrantId}`
+			) as HTMLElement;
+			
+			if (quadrant) {
+				// Set quadrant height
+				quadrant.style.height = `${height}px`;
+				
+				// Update tasks container height
+				const tasksContainer = quadrant.querySelector(
+					".eisenhower-matrix__quadrant-tasks"
+				) as HTMLElement;
+				
+				if (tasksContainer) {
+					tasksContainer.style.height = `${tasksContainerHeight}px`;
+					tasksContainer.style.overflowY = "auto";
+					
+					// Update background label position if it exists
+					const label = quadrant.querySelector(
+						".eisenhower-matrix__background-label"
+					) as HTMLElement;
+					
+					if (label) {
+						const availableHeight = height - headerHeight;
+						const tasksAreaCenter = headerHeight + (availableHeight / 2);
+						label.style.top = `${tasksAreaCenter}px`;
+					}
+				}
+			}
+		}
+	}
+
+	/**
 	 * Render a single quadrant
 	 */
-	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string, backgroundLabel?: string): void {
+	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string, backgroundLabel?: string, useAutoHeight: boolean = false): void {
 		if (!this.matrixContainer) return;
 
 		const quadrant = document.createElement("div");
 		quadrant.className = `eisenhower-matrix__quadrant eisenhower-matrix__quadrant--${quadrantId}`;
 		
 		// Base styles for all quadrants
+		// Use auto height initially for measurement, then apply uniform height later
+		const initialHeight = useAutoHeight ? "auto" : (quadrantId === "holding-pen" ? `${this.QUADRANT_FIXED_HEIGHT}px` : `${this.QUADRANT_FIXED_HEIGHT}px`);
 		let quadrantStyle = `
 			display: flex;
 			flex-direction: column;
@@ -179,7 +385,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			border-radius: 8px;
 			background: var(--background-secondary);
 			overflow: hidden;
-			height: ${this.QUADRANT_FIXED_HEIGHT}px;
+			height: ${initialHeight};
 			flex-shrink: 0;
 			position: relative;
 		`;
@@ -196,9 +402,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const label = document.createElement("div");
 			label.className = "eisenhower-matrix__background-label";
 			label.textContent = backgroundLabel;
-			// Calculate center position of tasks area (excluding header)
+			// For auto height, we'll position it later after height is calculated
+			// For now, use a temporary position that will be updated
 			const headerHeight = 50;
-			const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
+			const tempHeight = useAutoHeight ? 300 : this.QUADRANT_FIXED_HEIGHT; // Temporary estimate for auto height
+			const availableHeight = tempHeight - headerHeight;
 			const tasksAreaCenter = headerHeight + (availableHeight / 2);
 			label.style.cssText = `
 				position: absolute;
@@ -244,19 +452,36 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		count.style.cssText = "font-weight: normal; color: var(--text-muted); font-size: 12px;";
 		quadrant.appendChild(header);
 
-		// Tasks container - fixed height with scrolling
+		// Tasks container - height depends on whether we're measuring or using fixed height
 		const tasksContainer = document.createElement("div");
 		tasksContainer.className = "eisenhower-matrix__quadrant-tasks";
-		// Calculate available height: fixed quadrant height minus header height (~50px)
 		const headerHeight = 50;
-		const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
+		
+		// For holding-pen, use fixed height. For others, use auto if measuring, otherwise fixed
+		let tasksContainerHeight: string;
+		let overflowSetting: string;
+		
+		if (quadrantId === "holding-pen") {
+			// Holding pen always uses fixed height with scrolling
+			tasksContainerHeight = `${this.QUADRANT_FIXED_HEIGHT - headerHeight}px`;
+			overflowSetting = "auto";
+		} else if (useAutoHeight) {
+			// Use auto height for initial measurement
+			tasksContainerHeight = "auto";
+			overflowSetting = "visible";
+		} else {
+			// Will be set later by applyUniformHeightToQuadrants
+			tasksContainerHeight = `${this.QUADRANT_FIXED_HEIGHT - headerHeight}px`;
+			overflowSetting = "auto";
+		}
+		
 		tasksContainer.style.cssText = `
-			height: ${availableHeight}px;
-			overflow-y: auto;
+			height: ${tasksContainerHeight};
+			overflow-y: ${overflowSetting};
 			padding: 8px;
 			display: flex;
 			flex-direction: column;
-			gap: 8px;
+			gap: 2px;
 			flex-shrink: 0;
 			position: relative;
 			z-index: 1;
@@ -267,6 +492,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		const cardOptions = this.getCardOptions();
 
 		if (tasks.length === 0) {
+			// Add drop zone for empty quadrant
+			this.createDropZone(tasksContainer, quadrantId, null, 0);
+			
 			const empty = document.createElement("div");
 			empty.className = "eisenhower-matrix__quadrant-empty";
 			empty.style.cssText = `
@@ -283,8 +511,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Setup drop handlers for the quadrant (virtual scrolling doesn't prevent drops)
 			this.setupQuadrantDropHandlers(quadrant, quadrantId);
 		} else {
-			// Render normally for smaller quadrants
-			for (const task of tasks) {
+			// Render normally for smaller quadrants with drop zones
+			// Add drop zone at the beginning
+			this.createDropZone(tasksContainer, quadrantId, null, 0);
+			
+			for (let i = 0; i < tasks.length; i++) {
+				const task = tasks[i];
 				try {
 					// Wrap card in draggable container
 					const cardWrapper = document.createElement("div");
@@ -298,7 +530,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					this.taskInfoCache.set(task.path, task);
 					
 					// Setup drag handlers
-					this.setupCardDragHandlers(cardWrapper, task);
+					this.setupCardDragHandlers(cardWrapper, task, quadrantId);
+					
+					// Add drop zone after this task (before the next one)
+					this.createDropZone(tasksContainer, quadrantId, task.path, i + 1);
 				} catch (error) {
 					console.error(`[TaskNotes][EisenhowerMatrixView] Error creating card for ${task.path}:`, error);
 					// Continue with next task instead of crashing
@@ -352,13 +587,14 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 	private createVirtualQuadrant(
 		tasksContainer: HTMLElement,
-		quadrantId: string,
+		quadrantId: Quadrant,
 		tasks: TaskInfo[],
 		visibleProperties: string[],
 		cardOptions: any
 	): void {
 		// Container height is already set by renderQuadrant, just ensure it's scrollable
-		// Calculate available height: fixed quadrant height minus header height (~50px)
+		// For virtual scrolling, we still need to set a height
+		// This will be updated by applyUniformHeightToQuadrants if needed
 		const headerHeight = 50;
 		const availableHeight = this.QUADRANT_FIXED_HEIGHT - headerHeight;
 		tasksContainer.style.cssText = `
@@ -394,7 +630,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					this.taskInfoCache.set(task.path, task);
 					
 					// Setup drag handlers
-					this.setupCardDragHandlers(cardWrapper, task);
+					this.setupCardDragHandlers(cardWrapper, task, quadrantId);
 					
 					return cardWrapper;
 				} catch (error) {
@@ -420,14 +656,72 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		};
 	}
 
-	private setupCardDragHandlers(cardWrapper: HTMLElement, task: TaskInfo): void {
+	/**
+	 * Create a drop zone element for reordering tasks
+	 */
+	private createDropZone(container: HTMLElement, quadrantId: Quadrant, afterTaskPath: string | null, insertIndex: number): void {
+		const dropZone = document.createElement("div");
+		dropZone.className = "eisenhower-matrix__drop-zone";
+		dropZone.setAttribute("data-quadrant-id", quadrantId);
+		dropZone.setAttribute("data-insert-index", insertIndex.toString());
+		if (afterTaskPath) {
+			dropZone.setAttribute("data-after-task", afterTaskPath);
+		}
+		
+		dropZone.style.cssText = `
+			min-height: 4px;
+			margin: 2px 0;
+			border-radius: 2px;
+			transition: all 0.2s ease;
+		`;
+
+		// Setup drop zone handlers
+		dropZone.addEventListener("dragover", (e: DragEvent) => {
+			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
+			
+			// Only handle if dragging within the same quadrant
+			if (this.draggedFromQuadrant === quadrantId) {
+				e.preventDefault();
+				e.stopPropagation();
+				if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+				dropZone.classList.add("eisenhower-matrix__drop-zone--active");
+			}
+		});
+
+		dropZone.addEventListener("dragleave", () => {
+			dropZone.classList.remove("eisenhower-matrix__drop-zone--active");
+		});
+
+		dropZone.addEventListener("drop", async (e: DragEvent) => {
+			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
+			
+			// Only handle if dragging within the same quadrant
+			if (this.draggedFromQuadrant === quadrantId) {
+				e.preventDefault();
+				e.stopPropagation();
+				dropZone.classList.remove("eisenhower-matrix__drop-zone--active");
+				
+				// Determine the target task path for insertion
+				// If afterTaskPath is null, insert at beginning
+				// Otherwise, insert after the specified task
+				const targetTaskPath = afterTaskPath || null;
+				await this.handleTaskReorderToIndex(this.draggedTaskPath, quadrantId, insertIndex);
+			}
+		});
+
+		container.appendChild(dropZone);
+	}
+
+	private setupCardDragHandlers(cardWrapper: HTMLElement, task: TaskInfo, quadrantId: Quadrant): void {
 		cardWrapper.addEventListener("dragstart", (e: DragEvent) => {
 			this.draggedTaskPath = task.path;
+			this.draggedFromQuadrant = quadrantId;
 			cardWrapper.classList.add("eisenhower-matrix__card--dragging");
 
 			if (e.dataTransfer) {
 				e.dataTransfer.effectAllowed = "move";
 				e.dataTransfer.setData("text/plain", task.path);
+				e.dataTransfer.setData("text/x-quadrant-id", quadrantId);
 			}
 		});
 
@@ -438,8 +732,56 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.matrixContainer?.querySelectorAll('.eisenhower-matrix__quadrant--dragover').forEach(el => {
 				el.classList.remove('eisenhower-matrix__quadrant--dragover');
 			});
+			this.matrixContainer?.querySelectorAll('.eisenhower-matrix__card-wrapper--dragover').forEach(el => {
+				el.classList.remove('eisenhower-matrix__card-wrapper--dragover');
+			});
+			this.matrixContainer?.querySelectorAll('.eisenhower-matrix__drop-zone--active').forEach(el => {
+				el.classList.remove('eisenhower-matrix__drop-zone--active');
+			});
 			
 			this.draggedTaskPath = null;
+			this.draggedFromQuadrant = null;
+		});
+
+		// Add drop handlers for within-quadrant reordering
+		cardWrapper.addEventListener("dragover", (e: DragEvent) => {
+			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
+			
+			// Only handle if dragging within the same quadrant
+			if (this.draggedFromQuadrant === quadrantId && this.draggedTaskPath !== task.path) {
+				e.preventDefault();
+				e.stopPropagation();
+				if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+				
+				// Determine if dropping above or below based on mouse position
+				const rect = cardWrapper.getBoundingClientRect();
+				const midpoint = rect.top + rect.height / 2;
+				const insertBefore = e.clientY < midpoint;
+				
+				cardWrapper.classList.add("eisenhower-matrix__card-wrapper--dragover");
+				cardWrapper.setAttribute("data-insert-before", insertBefore.toString());
+			}
+		});
+
+		cardWrapper.addEventListener("dragleave", () => {
+			cardWrapper.classList.remove("eisenhower-matrix__card-wrapper--dragover");
+			cardWrapper.removeAttribute("data-insert-before");
+		});
+
+		cardWrapper.addEventListener("drop", async (e: DragEvent) => {
+			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
+			
+			// Only handle if dragging within the same quadrant
+			if (this.draggedFromQuadrant === quadrantId && this.draggedTaskPath !== task.path) {
+				e.preventDefault();
+				e.stopPropagation();
+				cardWrapper.classList.remove("eisenhower-matrix__card-wrapper--dragover");
+				
+				const insertBefore = cardWrapper.getAttribute("data-insert-before") === "true";
+				cardWrapper.removeAttribute("data-insert-before");
+				
+				await this.handleTaskReorder(this.draggedTaskPath, task.path, quadrantId, insertBefore);
+			}
 		});
 	}
 
@@ -467,8 +809,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 		});
 
-		// Drop handler
+		// Drop handler - only handles cross-quadrant moves
 		quadrant.addEventListener("drop", async (e: DragEvent) => {
+			// Don't handle if this is a same-quadrant drop (handled by card drop handler)
+			if (this.draggedFromQuadrant === quadrantId) {
+				return;
+			}
+
 			e.preventDefault();
 			e.stopPropagation();
 			quadrant.classList.remove("eisenhower-matrix__quadrant--dragover");
@@ -479,10 +826,131 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			await this.handleTaskDrop(this.draggedTaskPath, quadrantId);
 
 			this.draggedTaskPath = null;
+			this.draggedFromQuadrant = null;
 		});
 	}
 
+	private async handleTaskReorderToIndex(draggedTaskPath: string, quadrantId: Quadrant, targetIndex: number): Promise<void> {
+		try {
+			// Get current ordering for this quadrant
+			let ordering = this.quadrantOrderings.get(quadrantId);
+			if (!ordering) {
+				ordering = new Map();
+				this.quadrantOrderings.set(quadrantId, ordering);
+			}
+
+			// Get all tasks in this quadrant to determine current positions
+			const tasksContainer = this.matrixContainer?.querySelector(
+				`.eisenhower-matrix__quadrant--${quadrantId} .eisenhower-matrix__quadrant-tasks`
+			);
+			if (!tasksContainer) return;
+
+			// Get only task cards (not drop zones)
+			const cardWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper'));
+			const taskPaths = cardWrappers.map(wrapper => 
+				(wrapper as HTMLElement).getAttribute('data-task-path')
+			).filter(Boolean) as string[];
+
+			// Find current index of dragged task
+			const draggedIndex = taskPaths.indexOf(draggedTaskPath);
+			if (draggedIndex === -1) return;
+
+			// Calculate new order values
+			// Remove dragged task from its position
+			taskPaths.splice(draggedIndex, 1);
+			
+			// Adjust target index if dragging down (since we removed the item)
+			let insertIndex = targetIndex;
+			if (draggedIndex < targetIndex) {
+				insertIndex = targetIndex - 1;
+			}
+			
+			// Clamp insert index to valid range
+			insertIndex = Math.max(0, Math.min(insertIndex, taskPaths.length));
+			
+			// Insert at calculated position
+			taskPaths.splice(insertIndex, 0, draggedTaskPath);
+
+			// Update ordering map with new positions
+			taskPaths.forEach((path, index) => {
+				ordering!.set(path, index);
+			});
+
+			// Save ordering
+			this.saveQuadrantOrderings();
+
+			// Refresh to show updated order
+			this.debouncedRefresh();
+		} catch (error) {
+			console.error("[TaskNotes][EisenhowerMatrixView] Error reordering task:", error);
+		}
+	}
+
+	private async handleTaskReorder(draggedTaskPath: string, targetTaskPath: string, quadrantId: Quadrant, insertBefore: boolean): Promise<void> {
+		try {
+			// Get current ordering for this quadrant
+			let ordering = this.quadrantOrderings.get(quadrantId);
+			if (!ordering) {
+				ordering = new Map();
+				this.quadrantOrderings.set(quadrantId, ordering);
+			}
+
+			// Get all tasks in this quadrant to determine current positions
+			const tasksContainer = this.matrixContainer?.querySelector(
+				`.eisenhower-matrix__quadrant--${quadrantId} .eisenhower-matrix__quadrant-tasks`
+			);
+			if (!tasksContainer) return;
+
+			const cardWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper'));
+			const taskPaths = cardWrappers.map(wrapper => 
+				(wrapper as HTMLElement).getAttribute('data-task-path')
+			).filter(Boolean) as string[];
+
+			// Find current indices
+			const draggedIndex = taskPaths.indexOf(draggedTaskPath);
+			const targetIndex = taskPaths.indexOf(targetTaskPath);
+
+			if (draggedIndex === -1 || targetIndex === -1) return;
+
+			// Calculate new order values
+			// Remove dragged task from its position
+			taskPaths.splice(draggedIndex, 1);
+			
+			// Calculate insert position
+			let insertIndex = targetIndex;
+			if (draggedIndex < targetIndex) {
+				// Moving down: target index is already adjusted by removal
+				insertIndex = insertBefore ? targetIndex - 1 : targetIndex;
+			} else {
+				// Moving up: target index is unchanged
+				insertIndex = insertBefore ? targetIndex : targetIndex + 1;
+			}
+			
+			// Insert at calculated position
+			taskPaths.splice(insertIndex, 0, draggedTaskPath);
+
+			// Update ordering map with new positions
+			taskPaths.forEach((path, index) => {
+				ordering!.set(path, index);
+			});
+
+			// Save ordering
+			this.saveQuadrantOrderings();
+
+			// Refresh to show updated order
+			this.debouncedRefresh();
+		} catch (error) {
+			console.error("[TaskNotes][EisenhowerMatrixView] Error reordering task:", error);
+		}
+	}
+
 	private async handleTaskDrop(taskPath: string, targetQuadrant: Quadrant): Promise<void> {
+		// Check if this is a same-quadrant drop (should be handled by handleTaskReorder instead)
+		if (this.draggedFromQuadrant === targetQuadrant) {
+			// Same quadrant drops are handled by card drop handlers
+			return;
+		}
+
 		try {
 			const task = this.taskInfoCache.get(taskPath);
 			if (!task) {
@@ -497,6 +965,28 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			} else {
 				await this.updateTaskTagsForQuadrant(task, targetQuadrant);
 			}
+
+			// Clear ordering for the old quadrant and assign new order in target quadrant
+			if (this.draggedFromQuadrant) {
+				const oldOrdering = this.quadrantOrderings.get(this.draggedFromQuadrant);
+				if (oldOrdering) {
+					oldOrdering.delete(taskPath);
+					this.saveQuadrantOrderings();
+				}
+			}
+
+			// Add to end of target quadrant's ordering
+			let targetOrdering = this.quadrantOrderings.get(targetQuadrant);
+			if (!targetOrdering) {
+				targetOrdering = new Map();
+				this.quadrantOrderings.set(targetQuadrant, targetOrdering);
+			}
+			// Get max order value and add 1
+			const maxOrder = targetOrdering.size > 0 
+				? Math.max(...Array.from(targetOrdering.values()))
+				: -1;
+			targetOrdering.set(taskPath, maxOrder + 1);
+			this.saveQuadrantOrderings();
 
 			// Refresh to show updated position
 			this.debouncedRefresh();
