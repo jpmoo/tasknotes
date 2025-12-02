@@ -406,11 +406,11 @@
    EISENHOWER MATRIX VIEW
    ================================================ */
 
-/* Main matrix container - 2x2 grid with fixed-height quadrants + uncategorized region */
+/* Main matrix container - 2x2 grid with fixed-height quadrants + uncategorized + excluded regions */
 .eisenhower-matrix {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto auto; /* 2 rows for matrix + 1 row for uncategorized */
+    grid-template-rows: auto auto auto auto; /* 2 rows for matrix + 1 row for uncategorized + 1 row for excluded */
     gap: var(--tn-spacing-md);
     padding: var(--tn-spacing-md);
     box-sizing: border-box;
@@ -427,7 +427,7 @@
     overflow: hidden;
     height: 275px; /* Fixed height for ~5 task cards */
     flex-shrink: 0;
-    transition: all 0.2s ease;
+    transition: height 0.3s ease;
 }
 
 /* Drag over state for quadrants */
@@ -539,11 +539,48 @@
     border-style: dashed;
 }
 
+/* Excluded region - spans full width, gray background */
+.eisenhower-matrix__quadrant--excluded {
+    grid-column: 1 / -1;
+    border-color: var(--text-muted, #808080);
+    border-style: dashed;
+    background: rgba(128, 128, 128, 0.08) !important; /* Gray with less tan */
+}
+
+/* Collapsible quadrant toggle */
+.eisenhower-matrix__quadrant-toggle {
+    transition: transform 0.2s ease;
+}
+
+.eisenhower-matrix__quadrant-toggle svg {
+    color: var(--text-muted);
+}
+
+/* Collapsed state - shrink quadrant to just header height */
+.eisenhower-matrix__quadrant--collapsed {
+    min-height: auto !important;
+}
+
+.eisenhower-matrix__quadrant--collapsed .eisenhower-matrix__quadrant-tasks {
+    display: none !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    flex-shrink: 1 !important;
+}
+
+/* Ensure toggle is visible and clickable */
+.eisenhower-matrix__quadrant-toggle {
+    pointer-events: auto;
+    z-index: 10;
+}
+
 /* Responsive design for Eisenhower matrix */
 @media (max-width: 768px) {
     .eisenhower-matrix {
         grid-template-columns: 1fr;
-        grid-template-rows: repeat(5, auto);
+        grid-template-rows: repeat(6, auto); /* 4 quadrants + uncategorized + excluded */
         gap: var(--tn-spacing-sm);
     }
 
@@ -551,7 +588,8 @@
         min-height: 150px;
     }
     
-    .eisenhower-matrix__quadrant--holding-pen {
+    .eisenhower-matrix__quadrant--holding-pen,
+    .eisenhower-matrix__quadrant--excluded {
         grid-column: 1;
     }
 }

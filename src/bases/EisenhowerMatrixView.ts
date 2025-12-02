@@ -7,7 +7,7 @@ import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
 import { TFile } from "obsidian";
 
-type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen";
+type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen" | "excluded";
 
 export class EisenhowerMatrixView extends BasesViewBase {
 	type = "tasknoteEisenhowerMatrix";
@@ -37,10 +37,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	protected setupContainer(): void {
 		super.setupContainer();
 
-		// Create matrix container - 2x2 grid for quadrants + uncategorized region below
+		// Create matrix container - 2x2 grid for quadrants + uncategorized + excluded regions below
 		const matrix = document.createElement("div");
 		matrix.className = "eisenhower-matrix";
-		matrix.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 12px; height: 100%; padding: 12px;";
+		matrix.style.cssText = "display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto auto; gap: 12px; height: 100%; padding: 12px;";
 		this.rootElement?.appendChild(matrix);
 		this.matrixContainer = matrix;
 	}
@@ -110,7 +110,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			});
 			
 			// Render uncategorized region (spans full width below the matrix) - fixed height
-			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized");
+			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized", undefined, false, true);
+			
+			// Render excluded region (spans full width below uncategorized) - fixed height
+			this.renderQuadrant("excluded", quadrants.excluded, "Excluded", undefined, false, true);
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
 			this.renderError(error);
@@ -118,8 +121,43 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
+	 * Check if a task is a subtask (has a project link to another task)
+	 */
+	private isSubtask(task: TaskInfo): boolean {
+		if (!task.projects || task.projects.length === 0) {
+			return false;
+		}
+
+		// Check if any project is a markdown link that resolves to a task file
+		for (const project of task.projects) {
+			if (typeof project === "string" && project.startsWith("[[") && project.endsWith("]]")) {
+				const linkContent = project.slice(2, -2).trim();
+				// Try to resolve the link
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(linkContent, "");
+				if (resolvedFile instanceof TFile) {
+					// Check if the resolved file is a task
+					const metadata = this.app.metadataCache.getFileCache(resolvedFile);
+					if (metadata?.frontmatter && this.plugin.cacheManager.isTaskFile(metadata.frontmatter)) {
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if a task is blocked
+	 */
+	private isBlocked(task: TaskInfo): boolean {
+		return task.isBlocked === true || (task.blockedBy !== undefined && task.blockedBy.length > 0);
+	}
+
+	/**
 	 * Categorize tasks into quadrants based on yUrgent, nUrgent, yImportant, nImportant tags
 	 * Tasks with none of these tags go to the uncategorized region
+	 * Excluded region starts empty - users can drag tasks there manually
 	 */
 	private categorizeTasks(tasks: TaskInfo[]): {
 		urgentImportant: TaskInfo[];
@@ -127,6 +165,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		notUrgentImportant: TaskInfo[];
 		notUrgentNotImportant: TaskInfo[];
 		holdingPen: TaskInfo[];
+		excluded: TaskInfo[];
 	} {
 		const quadrants = {
 			urgentImportant: [] as TaskInfo[],
@@ -134,9 +173,18 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			notUrgentImportant: [] as TaskInfo[],
 			notUrgentNotImportant: [] as TaskInfo[],
 			holdingPen: [] as TaskInfo[],
+			excluded: [] as TaskInfo[],
 		};
 
 		for (const task of tasks) {
+			// Check if task has excluded tag first
+			if (this.hasTag(task, "excluded")) {
+				quadrants.excluded.push(task);
+				// Cache task info
+				this.taskInfoCache.set(task.path, task);
+				continue;
+			}
+
 			const hasYImportant = this.hasTag(task, "yImportant");
 			const hasNImportant = this.hasTag(task, "nImportant");
 			const hasYUrgent = this.hasTag(task, "yUrgent");
@@ -146,7 +194,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const hasAnyTag = hasYImportant || hasNImportant || hasYUrgent || hasNUrgent;
 
 			if (!hasAnyTag) {
-				// No tags → uncategorized
+				// No tags → uncategorized (including subtasks and blocked tasks)
 				quadrants.holdingPen.push(task);
 			} else {
 				// Determine quadrant based on tags
@@ -222,12 +270,15 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		notUrgentImportant: TaskInfo[];
 		notUrgentNotImportant: TaskInfo[];
 		holdingPen: TaskInfo[];
+		excluded: TaskInfo[];
 	}): void {
 		const quadrantMap: Record<string, TaskInfo[]> = {
 			'urgent-important': quadrants.urgentImportant,
 			'not-urgent-important': quadrants.notUrgentImportant,
 			'urgent-not-important': quadrants.urgentNotImportant,
 			'not-urgent-not-important': quadrants.notUrgentNotImportant,
+			'holding-pen': quadrants.holdingPen,
+			'excluded': quadrants.excluded,
 		};
 
 		for (const [quadrantId, tasks] of Object.entries(quadrantMap)) {
@@ -369,7 +420,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	/**
 	 * Render a single quadrant
 	 */
-	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string, backgroundLabel?: string, useAutoHeight: boolean = false): void {
+	private renderQuadrant(quadrantId: Quadrant, tasks: TaskInfo[], title: string, backgroundLabel?: string, useAutoHeight: boolean = false, isCollapsible: boolean = false): void {
 		if (!this.matrixContainer) return;
 
 		const quadrant = document.createElement("div");
@@ -390,8 +441,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			position: relative;
 		`;
 		
-		// Special styling for uncategorized region (spans full width)
-		if (quadrantId === "holding-pen") {
+		// Special styling for uncategorized and excluded regions (spans full width)
+		if (quadrantId === "holding-pen" || quadrantId === "excluded") {
 			quadrantStyle += `grid-column: 1 / -1;`;
 		}
 		
@@ -444,6 +495,58 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			position: relative;
 			z-index: 1;
 		`;
+		
+		// Add collapsible toggle if needed
+		if (isCollapsible) {
+			const toggle = document.createElement("div");
+			toggle.className = "eisenhower-matrix__quadrant-toggle";
+			toggle.style.cssText = `
+				cursor: pointer;
+				user-select: none;
+				margin-right: 8px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 20px;
+				height: 20px;
+				flex-shrink: 0;
+			`;
+			toggle.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l3 3-3 3"/></svg>`;
+			
+			let isCollapsed = false;
+			
+			toggle.addEventListener("click", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				isCollapsed = !isCollapsed;
+				quadrant.classList.toggle("eisenhower-matrix__quadrant--collapsed", isCollapsed);
+				toggle.style.transform = isCollapsed ? "rotate(-90deg)" : "rotate(0deg)";
+				
+				// Get header height for collapsed state
+				const header = quadrant.querySelector(".eisenhower-matrix__quadrant-header") as HTMLElement;
+				if (!header) return;
+				
+				if (isCollapsed) {
+					// Collapse to header height
+					const headerHeight = header.offsetHeight;
+					// Store current height before collapsing
+					const currentHeight = quadrant.offsetHeight;
+					(quadrant as any).__originalHeight = currentHeight;
+					quadrant.style.height = `${headerHeight}px`;
+				} else {
+					// Restore to original height (stored or default)
+					const storedHeight = (quadrant as any).__originalHeight;
+					const restoreHeight = storedHeight || 
+						(quadrantId === "holding-pen" || quadrantId === "excluded" 
+							? this.QUADRANT_FIXED_HEIGHT 
+							: this.QUADRANT_FIXED_HEIGHT);
+					quadrant.style.height = `${restoreHeight}px`;
+				}
+			});
+			
+			header.appendChild(toggle);
+		}
+		
 		header.createSpan({ text: title });
 		const count = header.createSpan({
 			text: `(${tasks.length})`,
@@ -461,8 +564,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		let tasksContainerHeight: string;
 		let overflowSetting: string;
 		
-		if (quadrantId === "holding-pen") {
-			// Holding pen always uses fixed height with scrolling
+		if (quadrantId === "holding-pen" || quadrantId === "excluded") {
+			// Holding pen and excluded always use fixed height with scrolling
 			tasksContainerHeight = `${this.QUADRANT_FIXED_HEIGHT - headerHeight}px`;
 			overflowSetting = "auto";
 		} else if (useAutoHeight) {
@@ -543,6 +646,59 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		
 		// Setup drop handlers for the quadrant
 		this.setupQuadrantDropHandlers(quadrant, quadrantId);
+		
+		// Also set up drop handlers on tasks container for excluded and holding-pen
+		// to ensure drops are caught even when dropping on empty areas
+		// Only handle drops INTO these quadrants, not FROM them
+		if (quadrantId === "excluded" || quadrantId === "holding-pen") {
+			// Set up a separate handler for the tasks container that only handles drops INTO this quadrant
+			tasksContainer.addEventListener("dragover", (e: DragEvent) => {
+				// Only allow dragover if dragging FROM a different quadrant
+				// AND we're actually over this tasks container (not just bubbling through)
+				if (this.draggedFromQuadrant && 
+				    this.draggedFromQuadrant !== quadrantId &&
+				    tasksContainer.contains(e.target as Node)) {
+					e.preventDefault();
+					// Don't stop propagation - let quadrant handler also see it
+					if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+					quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
+				}
+				// For same-quadrant or no quadrant, don't prevent - let it bubble
+			});
+			
+			tasksContainer.addEventListener("drop", async (e: DragEvent) => {
+				// Only handle if dragging FROM a different quadrant
+				// AND we're actually dropping on this tasks container or its children
+				const target = e.target as HTMLElement;
+				const isWithinContainer = target && (
+					target === tasksContainer || 
+					tasksContainer.contains(target) ||
+					target.closest('.eisenhower-matrix__quadrant-tasks') === tasksContainer
+				);
+				
+				if (this.draggedFromQuadrant && 
+				    this.draggedFromQuadrant !== quadrantId && 
+				    this.draggedTaskPath &&
+				    isWithinContainer) {
+					e.preventDefault();
+					e.stopPropagation(); // Stop here to prevent quadrant handler from also handling
+					quadrant.classList.remove("eisenhower-matrix__quadrant--dragover");
+					
+					// Store the task path before clearing it
+					const taskPath = this.draggedTaskPath;
+					const fromQuadrant = this.draggedFromQuadrant;
+					
+					// Clear immediately to prevent double handling
+					this.draggedTaskPath = null;
+					this.draggedFromQuadrant = null;
+					
+					// Update tags based on target quadrant
+					await this.handleTaskDrop(taskPath, quadrantId);
+					return; // Explicitly return to prevent further processing
+				}
+				// For same-quadrant drops or no valid drag, don't prevent - let it bubble
+			});
+		}
 
 		quadrant.appendChild(tasksContainer);
 		this.matrixContainer.appendChild(quadrant);
@@ -686,6 +842,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 				dropZone.classList.add("eisenhower-matrix__drop-zone--active");
 			}
+			// For cross-quadrant drags, don't prevent - let it bubble to quadrant handler
 		});
 
 		dropZone.addEventListener("dragleave", () => {
@@ -707,6 +864,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				const targetTaskPath = afterTaskPath || null;
 				await this.handleTaskReorderToIndex(this.draggedTaskPath, quadrantId, insertIndex);
 			}
+			// For cross-quadrant drops, don't prevent - let it bubble to quadrant handler
 		});
 
 		container.appendChild(dropZone);
@@ -761,6 +919,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				cardWrapper.classList.add("eisenhower-matrix__card-wrapper--dragover");
 				cardWrapper.setAttribute("data-insert-before", insertBefore.toString());
 			}
+			// For cross-quadrant drags, don't prevent default or stop propagation
+			// Let the event bubble up to the quadrant's dragover handler
 		});
 
 		cardWrapper.addEventListener("dragleave", () => {
@@ -781,17 +941,30 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				cardWrapper.removeAttribute("data-insert-before");
 				
 				await this.handleTaskReorder(this.draggedTaskPath, task.path, quadrantId, insertBefore);
+				return; // Explicitly return to prevent further processing
 			}
+			// For cross-quadrant drops, don't prevent default or stop propagation
+			// Let the event bubble up to the quadrant's drop handler
 		});
 	}
 
 	private setupQuadrantDropHandlers(quadrant: HTMLElement, quadrantId: Quadrant): void {
-		// Drag over handler
+		// Drag over handler - must always prevent default for drops to work
 		quadrant.addEventListener("dragover", (e: DragEvent) => {
-			e.preventDefault();
-			e.stopPropagation();
-			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-			quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
+			// Always prevent default if we have a drag in progress (required for drop to work)
+			if (this.draggedTaskPath) {
+				// Only show visual feedback if dragging from a different quadrant
+				if (!this.draggedFromQuadrant || this.draggedFromQuadrant !== quadrantId) {
+					e.preventDefault();
+					e.stopPropagation();
+					if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+					quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
+				} else {
+					// Same quadrant - still prevent default but don't show visual feedback
+					// (card handlers will handle the visual feedback)
+					e.preventDefault();
+				}
+			}
 		});
 
 		// Drag leave handler
@@ -810,9 +983,15 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		});
 
 		// Drop handler - only handles cross-quadrant moves
+		// Use capture phase to catch drops before child handlers
 		quadrant.addEventListener("drop", async (e: DragEvent) => {
 			// Don't handle if this is a same-quadrant drop (handled by card drop handler)
 			if (this.draggedFromQuadrant === quadrantId) {
+				return;
+			}
+
+			// If draggedTaskPath is null, it was already handled by a tasks container handler
+			if (!this.draggedTaskPath || !this.draggedFromQuadrant) {
 				return;
 			}
 
@@ -820,14 +999,16 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			e.stopPropagation();
 			quadrant.classList.remove("eisenhower-matrix__quadrant--dragover");
 
-			if (!this.draggedTaskPath) return;
-
 			// Update tags based on target quadrant
-			await this.handleTaskDrop(this.draggedTaskPath, quadrantId);
-
+			const taskPath = this.draggedTaskPath;
+			const fromQuadrant = this.draggedFromQuadrant;
+			
+			// Clear immediately to prevent double handling
 			this.draggedTaskPath = null;
 			this.draggedFromQuadrant = null;
-		});
+			
+			await this.handleTaskDrop(taskPath, quadrantId);
+		}, true); // Use capture phase
 	}
 
 	private async handleTaskReorderToIndex(draggedTaskPath: string, quadrantId: Quadrant, targetIndex: number): Promise<void> {
@@ -1004,18 +1185,20 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		const tagNUrgent = "nUrgent";
 		const tagYImportant = "yImportant";
 		const tagNImportant = "nImportant";
+		const tagExcluded = "excluded";
 
 		// Build new tags array
 		const newTags: string[] = [];
 		
-		// Keep all existing tags except the four eisenhower tags (we'll add them back if needed)
+		// Keep all existing tags except the four eisenhower tags and excluded tag (we'll add them back if needed)
 		for (const tag of currentTags) {
 			const normalized = tag.toLowerCase();
 			if (
 				normalized !== tagYUrgent.toLowerCase() &&
 				normalized !== tagNUrgent.toLowerCase() &&
 				normalized !== tagYImportant.toLowerCase() &&
-				normalized !== tagNImportant.toLowerCase()
+				normalized !== tagNImportant.toLowerCase() &&
+				normalized !== tagExcluded.toLowerCase()
 			) {
 				newTags.push(tag); // Keep original case
 			}
@@ -1023,8 +1206,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 		// Add tags based on target quadrant - use all 4 tags to be explicit
 		if (targetQuadrant === "holding-pen") {
-			// Remove all eisenhower tags (already filtered above)
+			// Remove all eisenhower tags and excluded tag (already filtered above)
 			// Don't add any tags - task remains uncategorized
+		} else if (targetQuadrant === "excluded") {
+			// Remove all eisenhower tags (already filtered above)
+			// Add excluded tag
+			newTags.push(tagExcluded);
 		} else {
 			// Determine which tags should be present based on target quadrant
 			const shouldHaveUrgent = targetQuadrant === "urgent-important" || targetQuadrant === "urgent-not-important";

@@ -217,6 +217,9 @@ export default class TaskNotesPlugin extends Plugin {
 	// Bases filter converter for exporting saved views
 	basesFilterConverter: import("./services/BasesFilterConverter").BasesFilterConverter;
 
+	// Canvas integration service
+	canvasIntegrationService: import("./services/CanvasIntegrationService").CanvasIntegrationService;
+
 	// Command localization support
 	private commandDefinitions: TranslatedCommandDefinition[] = [];
 	private registeredCommands = new Map<string, string>();
@@ -538,6 +541,57 @@ export default class TaskNotesPlugin extends Plugin {
 
 			// Register reading mode task link processor
 			this.registerMarkdownPostProcessor(createReadingModeTaskLinkProcessor(this));
+
+			// Canvas integration disabled - Canvas's rendering system is too aggressive
+			// and removes our content before it can be displayed
+			// TODO: Re-enable when Obsidian provides better Canvas customization APIs
+			/*
+			// Initialize Canvas integration service
+			try {
+				const { CanvasIntegrationService } = await import("./services/CanvasIntegrationService");
+				this.canvasIntegrationService = new CanvasIntegrationService(this);
+				this.addChild(this.canvasIntegrationService);
+			} catch (error) {
+				// Failed to initialize Canvas integration service
+			}
+
+			// Register markdown post-processor for Canvas nodes
+			// This runs when Canvas renders markdown content for file nodes
+			this.registerMarkdownPostProcessor((element, context) => {
+				// Check if we're in a Canvas context
+				const canvasNode = element.closest(".canvas-node");
+				if (!canvasNode) return;
+
+				// Make sure we're in display/preview mode, not edit mode
+				// Edit mode has .cm-editor or .markdown-source-view
+				if (element.closest(".cm-editor") || element.closest(".markdown-source-view")) {
+					return; // Skip edit mode
+				}
+
+				// Get the file from context
+				const file = context.sourcePath ? 
+					this.app.vault.getAbstractFileByPath(context.sourcePath) : null;
+				
+				if (!(file instanceof TFile)) return;
+
+				// Get file metadata to check if it's a task
+				const metadata = this.app.metadataCache.getFileCache(file);
+				if (!metadata?.frontmatter || !this.cacheManager.isTaskFile(metadata.frontmatter)) {
+					return;
+				}
+
+				// Get node ID from the canvas node
+				const nodeId = (canvasNode as HTMLElement).getAttribute("data-node-id") ||
+				               (canvasNode as HTMLElement).getAttribute("data-id") ||
+				               (canvasNode as HTMLElement).id?.replace("canvas-node-", "");
+				
+				if (!nodeId) return;
+				
+				// Replace content with task card immediately
+				// The element passed here is the markdown preview content
+				this.canvasIntegrationService.replaceCanvasNodeContentViaPostProcessor(nodeId, file, element);
+			});
+			*/
 
 			// Initialize task manager (lightweight - no index building)
 			this.cacheManager.initialize();

@@ -1386,3 +1386,78 @@
 .tasknotes-plugin .kanban-view__card-wrapper--selected-primary {
     box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
+
+/* =================================================================
+   CANVAS INTEGRATION STYLES
+   ================================================================= */
+
+/* Task cards on Canvas - optimized for Canvas node display */
+.task-card--canvas {
+    /* Remove default padding to fit within Canvas node */
+    padding: var(--tn-spacing-sm) var(--tn-spacing-md);
+    margin: 0;
+    
+    /* Ensure card fits well in Canvas nodes */
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    
+    /* Match Canvas node styling */
+    background-color: var(--background-primary);
+    border-radius: var(--tn-radius-sm);
+    
+    /* Ensure interactive elements are clickable */
+    pointer-events: auto;
+    position: relative;
+    z-index: 1;
+}
+
+/* Ensure all interactive elements in Canvas cards are clickable */
+.task-card--canvas .task-card__status-dot,
+.task-card--canvas .task-card__priority-dot,
+.task-card--canvas .task-card__metadata-date,
+.task-card--canvas .task-card__context-menu,
+.task-card--canvas .task-card__badges > * {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    position: relative;
+    z-index: 10 !important;
+    display: inline-block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Ensure status and priority dots are visible */
+.task-card--canvas .task-card__status-dot,
+.task-card--canvas .task-card__priority-dot {
+    width: 12px !important;
+    height: 12px !important;
+    min-width: 12px !important;
+    min-height: 12px !important;
+    border-width: 2px !important;
+    border-style: solid !important;
+    border-radius: 50% !important;
+    display: inline-block !important;
+    flex-shrink: 0 !important;
+}
+
+/* Canvas node content wrapper adjustments */
+.canvas-node-content .task-card--canvas,
+.markdown-embed-content .task-card--canvas {
+    /* Remove any default Canvas content styling that might interfere */
+    border: none;
+    box-shadow: none;
+}
+
+/* Ensure task card elements are properly sized in Canvas */
+.canvas-node .task-card--canvas .task-card__main-row {
+    gap: var(--tn-spacing-xs);
+}
+
+.canvas-node .task-card--canvas .task-card__title {
+    font-size: var(--tn-font-size-md);
+}
+
+.canvas-node .task-card--canvas .task-card__metadata {
+    font-size: var(--tn-font-size-xs);
+}
