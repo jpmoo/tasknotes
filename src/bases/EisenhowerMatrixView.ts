@@ -20,14 +20,28 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
 	/**
-	 * Fixed height for quadrants (approximately 5 task cards).
-	 * Each task card is ~45px + 8px gap = ~53px per card.
-	 * 5 cards × 53px = ~265px, plus padding = ~275px
+	 * Fixed height for quadrants: 400px content + 50px header = 450px total
 	 */
-	private readonly QUADRANT_FIXED_HEIGHT = 275; // pixels
+	private readonly QUADRANT_FIXED_HEIGHT = 450; // pixels (400px content + 50px header)
+	/**
+	 * Fixed height for uncategorized and excluded regions: 200px total (150px content + 50px header)
+	 */
+	private readonly UNCATEGORIZED_FIXED_HEIGHT = 200; // pixels (150px content + 50px header)
 	private draggedTaskPath: string | null = null;
 	private draggedFromQuadrant: Quadrant | null = null;
 	private quadrantOrderings: Map<Quadrant, Map<string, number>> = new Map();
+	private collapsedSections: Set<Quadrant> = new Set(); // Track collapsed sections (holding-pen, excluded)
+	
+	// Static timestamp-based approach to persist flags across view instance recreations
+	// Uses a global timestamp that's checked within a short window (3 seconds)
+	private static lastSelectiveUpdateTime: number = 0;
+	private static skipDataUpdateCount: number = 0;
+	private static readonly SELECTIVE_UPDATE_WINDOW_MS = 3000; // 3 second window
+	
+	// Instance properties (may be lost if view is recreated)
+	private justDidSelectiveUpdate = false; // Flag to skip onDataUpdated() if we just updated UI selectively
+	private skipNextDataUpdate = false; // Additional flag to skip the very next onDataUpdated() call
+	private skipDataUpdateCount = 0; // Counter to track how many onDataUpdated() calls to skip
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -79,6 +93,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 			// Load quadrant orderings from config
 			this.loadQuadrantOrderings();
+			this.loadCollapsedState();
 
 			// Categorize tasks into quadrants
 			const quadrants = this.categorizeTasks(taskNotes);
@@ -87,27 +102,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.applyOrderingToQuadrants(quadrants);
 
 			// Render each quadrant - top row: Important quadrants, bottom row: Not Important quadrants
-			// First render with auto height to measure content
-			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO", true);
-			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE", true);
-			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE", true);
-			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER", true);
-			
-			// Wait for DOM to render, then calculate and apply heights
-			// Pass task counts to handle virtual scrolling cases
-			const taskCounts = {
-				"urgent-important": quadrants.urgentImportant.length,
-				"not-urgent-important": quadrants.notUrgentImportant.length,
-				"urgent-not-important": quadrants.urgentNotImportant.length,
-				"not-urgent-not-important": quadrants.notUrgentNotImportant.length,
-			};
-			
-			// Use requestAnimationFrame to ensure DOM is fully rendered before measuring
-			requestAnimationFrame(() => {
-				const maxHeight = this.calculateMaxQuadrantHeight(taskCounts);
-				// Apply the maximum height to all four quadrants
-				this.applyUniformHeightToQuadrants(maxHeight);
-			});
+			// All use fixed height (450px total: 400px content + 50px header) set directly in renderQuadrant
+			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO", false);
+			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE", false);
+			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE", false);
+			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER", false);
 			
 			// Render uncategorized region (spans full width below the matrix) - fixed height
 			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized", undefined, false, true);
@@ -258,6 +257,34 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.config?.set?.('quadrantOrderings', orderingsJson);
 		} catch (error) {
 			console.error('[EisenhowerMatrixView] Failed to save quadrant orderings:', error);
+		}
+	}
+
+	/**
+	 * Load collapsed state from BasesViewConfig
+	 */
+	private loadCollapsedState(): void {
+		try {
+			const collapsedJson = this.config?.get?.('collapsedSections');
+			if (collapsedJson && typeof collapsedJson === 'string') {
+				const collapsed: string[] = JSON.parse(collapsedJson);
+				this.collapsedSections = new Set(collapsed as Quadrant[]);
+			}
+		} catch (error) {
+			console.error('[EisenhowerMatrixView] Failed to load collapsed state:', error);
+		}
+	}
+
+	/**
+	 * Save collapsed state to BasesViewConfig
+	 */
+	private saveCollapsedState(): void {
+		try {
+			const collapsedArray = Array.from(this.collapsedSections);
+			const collapsedJson = JSON.stringify(collapsedArray);
+			this.config?.set?.('collapsedSections', collapsedJson);
+		} catch (error) {
+			console.error('[EisenhowerMatrixView] Failed to save collapsed state:', error);
 		}
 	}
 
@@ -427,8 +454,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		quadrant.className = `eisenhower-matrix__quadrant eisenhower-matrix__quadrant--${quadrantId}`;
 		
 		// Base styles for all quadrants
-		// Use auto height initially for measurement, then apply uniform height later
-		const initialHeight = useAutoHeight ? "auto" : (quadrantId === "holding-pen" ? `${this.QUADRANT_FIXED_HEIGHT}px` : `${this.QUADRANT_FIXED_HEIGHT}px`);
+		// For the four main quadrants, always use fixed height (450px total: 400px content + 50px header)
+		// For holding-pen and excluded, use their own fixed height
+		const heightForQuadrant = (quadrantId === "holding-pen" || quadrantId === "excluded") 
+			? this.UNCATEGORIZED_FIXED_HEIGHT 
+			: this.QUADRANT_FIXED_HEIGHT;
+		const initialHeight = `${heightForQuadrant}px`;
 		let quadrantStyle = `
 			display: flex;
 			flex-direction: column;
@@ -456,7 +487,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// For auto height, we'll position it later after height is calculated
 			// For now, use a temporary position that will be updated
 			const headerHeight = 50;
-			const tempHeight = useAutoHeight ? 300 : this.QUADRANT_FIXED_HEIGHT; // Temporary estimate for auto height
+			const tempHeight = heightForQuadrant; // Use the actual height for this quadrant
 			const availableHeight = tempHeight - headerHeight;
 			const tasksAreaCenter = headerHeight + (availableHeight / 2);
 			label.style.cssText = `
@@ -513,14 +544,25 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			`;
 			toggle.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l3 3-3 3"/></svg>`;
 			
-			let isCollapsed = false;
+			// Load initial collapsed state from config
+			const isInitiallyCollapsed = this.collapsedSections.has(quadrantId);
+			
+			// Set initial chevron position (will apply collapsed state after header is appended)
+			if (isInitiallyCollapsed) {
+				toggle.style.transform = "rotate(0deg)"; // Point right (collapsed)
+			} else {
+				toggle.style.transform = "rotate(90deg)"; // Point down (open)
+			}
+			
+			let isCollapsed = isInitiallyCollapsed;
 			
 			toggle.addEventListener("click", (e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				isCollapsed = !isCollapsed;
 				quadrant.classList.toggle("eisenhower-matrix__quadrant--collapsed", isCollapsed);
-				toggle.style.transform = isCollapsed ? "rotate(-90deg)" : "rotate(0deg)";
+				// When collapsed, point right (0deg); when open, point down (90deg)
+				toggle.style.transform = isCollapsed ? "rotate(0deg)" : "rotate(90deg)";
 				
 				// Get header height for collapsed state
 				const header = quadrant.querySelector(".eisenhower-matrix__quadrant-header") as HTMLElement;
@@ -533,15 +575,19 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					const currentHeight = quadrant.offsetHeight;
 					(quadrant as any).__originalHeight = currentHeight;
 					quadrant.style.height = `${headerHeight}px`;
+					// Save to config
+					this.collapsedSections.add(quadrantId);
 				} else {
 					// Restore to original height (stored or default)
 					const storedHeight = (quadrant as any).__originalHeight;
-					const restoreHeight = storedHeight || 
-						(quadrantId === "holding-pen" || quadrantId === "excluded" 
-							? this.QUADRANT_FIXED_HEIGHT 
-							: this.QUADRANT_FIXED_HEIGHT);
+					const restoreHeight = storedHeight || heightForQuadrant;
 					quadrant.style.height = `${restoreHeight}px`;
+					// Remove from config
+					this.collapsedSections.delete(quadrantId);
 				}
+				
+				// Save collapsed state (on unload, like quadrant orderings, to avoid refresh)
+				// We'll save on unload instead of here to prevent any refresh triggers
 			});
 			
 			header.appendChild(toggle);
@@ -560,21 +606,17 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		tasksContainer.className = "eisenhower-matrix__quadrant-tasks";
 		const headerHeight = 50;
 		
-		// For holding-pen, use fixed height. For others, use auto if measuring, otherwise fixed
+		// For holding-pen and excluded, use their fixed height. For the four main quadrants, always use fixed height with scrolling
 		let tasksContainerHeight: string;
 		let overflowSetting: string;
 		
 		if (quadrantId === "holding-pen" || quadrantId === "excluded") {
 			// Holding pen and excluded always use fixed height with scrolling
-			tasksContainerHeight = `${this.QUADRANT_FIXED_HEIGHT - headerHeight}px`;
+			tasksContainerHeight = `${this.UNCATEGORIZED_FIXED_HEIGHT - headerHeight}px`;
 			overflowSetting = "auto";
-		} else if (useAutoHeight) {
-			// Use auto height for initial measurement
-			tasksContainerHeight = "auto";
-			overflowSetting = "visible";
 		} else {
-			// Will be set later by applyUniformHeightToQuadrants
-			tasksContainerHeight = `${this.QUADRANT_FIXED_HEIGHT - headerHeight}px`;
+			// Four main quadrants: always use fixed height (400px content) with scrolling
+			tasksContainerHeight = "400px"; // 400px content area
 			overflowSetting = "auto";
 		}
 		
@@ -635,6 +677,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					// Setup drag handlers
 					this.setupCardDragHandlers(cardWrapper, task, quadrantId);
 					
+					// Setup context menu with Eisenhower zone options
+					this.setupTaskContextMenu(cardWrapper, task);
+					
 					// Add drop zone after this task (before the next one)
 					this.createDropZone(tasksContainer, quadrantId, task.path, i + 1);
 				} catch (error) {
@@ -693,7 +738,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					this.draggedFromQuadrant = null;
 					
 					// Update tags based on target quadrant
-					await this.handleTaskDrop(taskPath, quadrantId);
+					// Pass fromQuadrant as parameter since we've already cleared this.draggedFromQuadrant
+					await this.handleTaskDrop(taskPath, quadrantId, fromQuadrant);
 					return; // Explicitly return to prevent further processing
 				}
 				// For same-quadrant drops or no valid drag, don't prevent - let it bubble
@@ -701,6 +747,18 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 
 		quadrant.appendChild(tasksContainer);
+		
+		// Apply initial collapsed state after everything is appended (for collapsible sections)
+		// Use requestAnimationFrame to ensure layout is complete before calculating height
+		if (isCollapsible && this.collapsedSections.has(quadrantId)) {
+			quadrant.classList.add("eisenhower-matrix__quadrant--collapsed");
+			// Use requestAnimationFrame to ensure header is fully laid out
+			requestAnimationFrame(() => {
+				const headerHeight = header.offsetHeight || 50; // Fallback to 50px if calculation fails
+				quadrant.style.height = `${headerHeight}px`;
+			});
+		}
+		
 		this.matrixContainer.appendChild(quadrant);
 	}
 
@@ -734,11 +792,100 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		this.matrixContainer.appendChild(errorEl);
 	}
 
+	/**
+	 * Override onDataUpdated to skip refresh if we just did a selective update
+	 */
+	onDataUpdated(): void {
+		// Check both instance flags and static timestamp-based flags (in case view was recreated)
+		const now = Date.now();
+		const timeSinceSelectiveUpdate = now - EisenhowerMatrixView.lastSelectiveUpdateTime;
+		const isWithinWindow = timeSinceSelectiveUpdate < EisenhowerMatrixView.SELECTIVE_UPDATE_WINDOW_MS;
+		const staticJustDidSelectiveUpdate = isWithinWindow && EisenhowerMatrixView.lastSelectiveUpdateTime > 0;
+		const staticSkipCount = EisenhowerMatrixView.skipDataUpdateCount;
+		
+		const justDidSelectiveUpdate = this.justDidSelectiveUpdate || staticJustDidSelectiveUpdate;
+		const skipDataUpdateCount = this.skipDataUpdateCount + staticSkipCount;
+		
+		console.log("[EisenhowerMatrixView] onDataUpdated called, timeSinceSelectiveUpdate:", timeSinceSelectiveUpdate, "ms, instance justDidSelectiveUpdate:", this.justDidSelectiveUpdate, "static justDidSelectiveUpdate:", staticJustDidSelectiveUpdate, "instance skipDataUpdateCount:", this.skipDataUpdateCount, "static skipDataUpdateCount:", staticSkipCount, "combined skipDataUpdateCount:", skipDataUpdateCount);
+		
+		// Skip if view is not visible
+		if (!this.rootElement?.isConnected) {
+			return;
+		}
+
+		// If we just did a selective update, skip ALL refreshes
+		// The UI is already up to date, so we don't need to refresh
+		if (justDidSelectiveUpdate || this.skipNextDataUpdate || skipDataUpdateCount > 0) {
+			console.log("[EisenhowerMatrixView] onDataUpdated - SKIPPING (just did selective update)");
+			
+			// IMPORTANT: Ensure the view is still visible - Bases might have cleared it
+			// Check both rootElement and matrixContainer
+			const viewCleared = !this.rootElement?.isConnected || 
+			                    !this.matrixContainer || 
+			                    !this.matrixContainer.isConnected ||
+			                    !this.rootElement.contains(this.matrixContainer);
+			
+			if (viewCleared) {
+				console.log("[EisenhowerMatrixView] View was cleared, forcing render. rootElement:", !!this.rootElement?.isConnected, "matrixContainer:", !!this.matrixContainer?.isConnected);
+				// View was cleared, we need to render
+				// But don't clear flags yet - we still need to skip the second onDataUpdated()
+				// Just render directly without going through onDataUpdated()
+				this.render();
+				return;
+			}
+			
+			// Update both instance and static flags
+			let newSkipCount = skipDataUpdateCount;
+			if (newSkipCount > 0) {
+				newSkipCount--;
+				this.skipDataUpdateCount = Math.max(0, this.skipDataUpdateCount - 1);
+				if (EisenhowerMatrixView.skipDataUpdateCount > 0) {
+					EisenhowerMatrixView.skipDataUpdateCount--;
+				}
+				console.log("[EisenhowerMatrixView] Decremented skipDataUpdateCount to:", newSkipCount);
+			}
+			
+			// Clear skipNextDataUpdate immediately (one-time skip)
+			if (this.skipNextDataUpdate) {
+				this.skipNextDataUpdate = false;
+			}
+			
+			// Clear the flags after a delay to catch both file save and config.set() triggers
+			if (justDidSelectiveUpdate) {
+				setTimeout(() => {
+					this.justDidSelectiveUpdate = false;
+					// Don't clear static timestamp here - let it expire naturally
+					console.log("[EisenhowerMatrixView] Cleared instance justDidSelectiveUpdate flag");
+				}, 2000);
+			}
+			
+			// IMPORTANT: Also clear any pending debounce timer from base class
+			// This prevents a delayed render from firing after we've skipped
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+				console.log("[EisenhowerMatrixView] Cleared pending dataUpdateDebounceTimer");
+			}
+			
+			return;
+		}
+
+		// Otherwise, use the base class behavior (debounced render)
+		super.onDataUpdated();
+	}
+
 	protected async handleTaskUpdate(task: TaskInfo): Promise<void> {
 		// Update cache
 		this.taskInfoCache.set(task.path, task);
-		// Full refresh since tasks might move quadrants
-		this.debouncedRefresh();
+		
+		// If we just did a selective update, skip this task update too
+		// The UI is already up to date from the selective update
+		if (this.justDidSelectiveUpdate || this.skipDataUpdateCount > 0) {
+			console.log("[EisenhowerMatrixView] handleTaskUpdate - SKIPPING (just did selective update)");
+			return;
+		}
+		
+		// Don't refresh here - onDataUpdated() will handle it if needed
 	}
 
 	private createVirtualQuadrant(
@@ -787,6 +934,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					
 					// Setup drag handlers
 					this.setupCardDragHandlers(cardWrapper, task, quadrantId);
+					
+					// Setup context menu with Eisenhower zone options
+					this.setupTaskContextMenu(cardWrapper, task);
 					
 					return cardWrapper;
 				} catch (error) {
@@ -856,12 +1006,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			if (this.draggedFromQuadrant === quadrantId) {
 				e.preventDefault();
 				e.stopPropagation();
+				e.stopImmediatePropagation(); // Prevent any other handlers
 				dropZone.classList.remove("eisenhower-matrix__drop-zone--active");
 				
-				// Determine the target task path for insertion
-				// If afterTaskPath is null, insert at beginning
-				// Otherwise, insert after the specified task
-				const targetTaskPath = afterTaskPath || null;
+				// Prevent default drag behavior - we'll handle the DOM manipulation ourselves
+				// Don't hide the element - handleTaskReorderToIndex will rebuild the DOM cleanly
 				await this.handleTaskReorderToIndex(this.draggedTaskPath, quadrantId, insertIndex);
 			}
 			// For cross-quadrant drops, don't prevent - let it bubble to quadrant handler
@@ -871,6 +1020,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	private setupCardDragHandlers(cardWrapper: HTMLElement, task: TaskInfo, quadrantId: Quadrant): void {
+		// Check if handlers are already attached to avoid duplicates
+		if ((cardWrapper as any).__dragHandlersAttached) {
+			return;
+		}
+		(cardWrapper as any).__dragHandlersAttached = true;
+		
 		cardWrapper.addEventListener("dragstart", (e: DragEvent) => {
 			this.draggedTaskPath = task.path;
 			this.draggedFromQuadrant = quadrantId;
@@ -935,12 +1090,28 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			if (this.draggedFromQuadrant === quadrantId && this.draggedTaskPath !== task.path) {
 				e.preventDefault();
 				e.stopPropagation();
+				e.stopImmediatePropagation(); // Prevent any other handlers
 				cardWrapper.classList.remove("eisenhower-matrix__card-wrapper--dragover");
 				
 				const insertBefore = cardWrapper.getAttribute("data-insert-before") === "true";
 				cardWrapper.removeAttribute("data-insert-before");
 				
-				await this.handleTaskReorder(this.draggedTaskPath, task.path, quadrantId, insertBefore);
+				// Prevent default drag behavior - we'll handle the DOM manipulation ourselves
+				const quadrant = cardWrapper.closest('.eisenhower-matrix__quadrant') as HTMLElement;
+				const tasksContainer = quadrant?.querySelector('.eisenhower-matrix__quadrant-tasks') as HTMLElement;
+				const draggedElement = tasksContainer?.querySelector(`[data-task-path="${CSS.escape(this.draggedTaskPath)}"]`) as HTMLElement;
+				if (draggedElement && draggedElement !== cardWrapper) {
+					// Temporarily hide the dragged element to prevent visual glitches
+					const originalDisplay = draggedElement.style.display;
+					draggedElement.style.display = 'none';
+					
+					await this.handleTaskReorder(this.draggedTaskPath, task.path, quadrantId, insertBefore);
+					
+					// Restore display (handleTaskReorder will have moved it)
+					draggedElement.style.display = originalDisplay;
+				} else {
+					await this.handleTaskReorder(this.draggedTaskPath, task.path, quadrantId, insertBefore);
+				}
 				return; // Explicitly return to prevent further processing
 			}
 			// For cross-quadrant drops, don't prevent default or stop propagation
@@ -955,10 +1126,10 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			if (this.draggedTaskPath) {
 				// Only show visual feedback if dragging from a different quadrant
 				if (!this.draggedFromQuadrant || this.draggedFromQuadrant !== quadrantId) {
-					e.preventDefault();
-					e.stopPropagation();
-					if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-					quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
+			e.preventDefault();
+			e.stopPropagation();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+			quadrant.classList.add("eisenhower-matrix__quadrant--dragover");
 				} else {
 					// Same quadrant - still prevent default but don't show visual feedback
 					// (card handlers will handle the visual feedback)
@@ -1002,17 +1173,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Update tags based on target quadrant
 			const taskPath = this.draggedTaskPath;
 			const fromQuadrant = this.draggedFromQuadrant;
-			
+
 			// Clear immediately to prevent double handling
 			this.draggedTaskPath = null;
 			this.draggedFromQuadrant = null;
 			
-			await this.handleTaskDrop(taskPath, quadrantId);
+			// Pass fromQuadrant as parameter since we've already cleared this.draggedFromQuadrant
+			await this.handleTaskDrop(taskPath, quadrantId, fromQuadrant);
 		}, true); // Use capture phase
 	}
 
 	private async handleTaskReorderToIndex(draggedTaskPath: string, quadrantId: Quadrant, targetIndex: number): Promise<void> {
 		try {
+			// No flags needed - we're not calling config.set() anymore
+			// DOM is already updated via drag and drop, no refresh needed
+			
 			// Get current ordering for this quadrant
 			let ordering = this.quadrantOrderings.get(quadrantId);
 			if (!ordering) {
@@ -1023,7 +1198,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Get all tasks in this quadrant to determine current positions
 			const tasksContainer = this.matrixContainer?.querySelector(
 				`.eisenhower-matrix__quadrant--${quadrantId} .eisenhower-matrix__quadrant-tasks`
-			);
+			) as HTMLElement;
 			if (!tasksContainer) return;
 
 			// Get only task cards (not drop zones)
@@ -1057,11 +1232,60 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				ordering!.set(path, index);
 			});
 
-			// Save ordering
-			this.saveQuadrantOrderings();
+			// Reorder DOM elements to match the new ordering
+			// First, get fresh list of wrappers (drag-and-drop may have already moved one)
+			const currentWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper')) as HTMLElement[];
+			
+			console.log(`[EisenhowerMatrixView] Reordering quadrant ${quadrantId}: ${currentWrappers.length} wrappers, ${taskPaths.length} paths`);
+			
+			// Verify we have the right number of wrappers
+			if (currentWrappers.length !== taskPaths.length) {
+				console.warn(`[EisenhowerMatrixView] Mismatch: ${currentWrappers.length} wrappers vs ${taskPaths.length} paths`);
+			}
+			
+			// Sort wrappers by their order in the ordering map
+			const sortedWrappers = currentWrappers.sort((a, b) => {
+				const pathA = a.getAttribute('data-task-path');
+				const pathB = b.getAttribute('data-task-path');
+				const orderA = pathA ? ordering!.get(pathA) ?? Infinity : Infinity;
+				const orderB = pathB ? ordering!.get(pathB) ?? Infinity : Infinity;
+				return orderA - orderB;
+			});
 
-			// Refresh to show updated order
-			this.debouncedRefresh();
+			// Remove all drop zones and empty states first (we'll recreate them)
+			const existingDropZones = tasksContainer.querySelectorAll('.eisenhower-matrix__drop-zone');
+			existingDropZones.forEach(zone => (zone as HTMLElement).remove());
+			const existingEmpty = tasksContainer.querySelector('.eisenhower-matrix__quadrant-empty');
+			if (existingEmpty) {
+				existingEmpty.remove();
+			}
+
+			// Clear container and re-append wrappers in sorted order
+			// This ensures clean ordering without duplicates
+			while (tasksContainer.firstChild) {
+				tasksContainer.removeChild(tasksContainer.firstChild);
+			}
+			
+			// Add drop zone at the beginning
+			this.createDropZone(tasksContainer, quadrantId, null, 0);
+			
+			// Re-append wrappers in sorted order and re-attach drag handlers
+			sortedWrappers.forEach((wrapper, index) => {
+				tasksContainer.appendChild(wrapper);
+				// Re-attach drag handlers since we rebuilt the DOM
+				const taskPath = wrapper.getAttribute('data-task-path');
+				if (taskPath) {
+					const task = this.taskInfoCache.get(taskPath);
+					if (task) {
+						this.setupCardDragHandlers(wrapper, task, quadrantId);
+					}
+				}
+				// Add drop zone after each wrapper
+				this.createDropZone(tasksContainer, quadrantId, taskPath, index + 1);
+			});
+
+			// Don't save ordering here - will be saved on unload
+			// This prevents config.set() from triggering refreshes
 		} catch (error) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error reordering task:", error);
 		}
@@ -1069,6 +1293,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 	private async handleTaskReorder(draggedTaskPath: string, targetTaskPath: string, quadrantId: Quadrant, insertBefore: boolean): Promise<void> {
 		try {
+			// No flags needed - we're not calling config.set() anymore
+			// DOM is already updated via drag and drop, no refresh needed
+			
 			// Get current ordering for this quadrant
 			let ordering = this.quadrantOrderings.get(quadrantId);
 			if (!ordering) {
@@ -1079,7 +1306,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Get all tasks in this quadrant to determine current positions
 			const tasksContainer = this.matrixContainer?.querySelector(
 				`.eisenhower-matrix__quadrant--${quadrantId} .eisenhower-matrix__quadrant-tasks`
-			);
+			) as HTMLElement;
 			if (!tasksContainer) return;
 
 			const cardWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper'));
@@ -1115,25 +1342,108 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				ordering!.set(path, index);
 			});
 
-			// Save ordering
-			this.saveQuadrantOrderings();
+			// Reorder DOM elements to match the new ordering
+			// First, get fresh list of wrappers (drag-and-drop may have already moved one)
+			const currentWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper')) as HTMLElement[];
+			
+			// Verify we have the right number of wrappers
+			if (currentWrappers.length !== taskPaths.length) {
+				console.warn(`[EisenhowerMatrixView] Mismatch: ${currentWrappers.length} wrappers vs ${taskPaths.length} paths`);
+			}
+			
+			// Sort wrappers by their order in the ordering map
+			const sortedWrappers = currentWrappers.sort((a, b) => {
+				const pathA = a.getAttribute('data-task-path');
+				const pathB = b.getAttribute('data-task-path');
+				const orderA = pathA ? ordering!.get(pathA) ?? Infinity : Infinity;
+				const orderB = pathB ? ordering!.get(pathB) ?? Infinity : Infinity;
+				return orderA - orderB;
+			});
 
-			// Refresh to show updated order
-			this.debouncedRefresh();
+			// Remove all drop zones and empty states first (we'll recreate them)
+			const existingDropZones = tasksContainer.querySelectorAll('.eisenhower-matrix__drop-zone');
+			existingDropZones.forEach(zone => (zone as HTMLElement).remove());
+			const existingEmpty = tasksContainer.querySelector('.eisenhower-matrix__quadrant-empty');
+			if (existingEmpty) {
+				existingEmpty.remove();
+			}
+
+			// Clear container and re-append wrappers in sorted order
+			// This ensures clean ordering without duplicates
+			while (tasksContainer.firstChild) {
+				tasksContainer.removeChild(tasksContainer.firstChild);
+			}
+			
+			// Add drop zone at the beginning
+			this.createDropZone(tasksContainer, quadrantId, null, 0);
+			
+			// Re-append wrappers in sorted order and re-attach drag handlers
+			sortedWrappers.forEach((wrapper, index) => {
+				tasksContainer.appendChild(wrapper);
+				// Re-attach drag handlers since we rebuilt the DOM
+				const taskPath = wrapper.getAttribute('data-task-path');
+				if (taskPath) {
+			const task = this.taskInfoCache.get(taskPath);
+					if (task) {
+						this.setupCardDragHandlers(wrapper, task, quadrantId);
+					}
+				}
+				// Add drop zone after each wrapper
+				this.createDropZone(tasksContainer, quadrantId, taskPath, index + 1);
+			});
+
+			// Don't save ordering here - will be saved on unload
+			// This prevents config.set() from triggering refreshes
 		} catch (error) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error reordering task:", error);
 		}
 	}
 
-	private async handleTaskDrop(taskPath: string, targetQuadrant: Quadrant): Promise<void> {
+	private async handleTaskDrop(taskPath: string, targetQuadrant: Quadrant, fromQuadrant?: Quadrant | null): Promise<void> {
+		// Use provided fromQuadrant, or fall back to this.draggedFromQuadrant if not provided
+		const sourceQuadrant = fromQuadrant !== undefined ? fromQuadrant : this.draggedFromQuadrant;
+		
 		// Check if this is a same-quadrant drop (should be handled by handleTaskReorder instead)
-		if (this.draggedFromQuadrant === targetQuadrant) {
+		if (sourceQuadrant === targetQuadrant) {
 			// Same quadrant drops are handled by card drop handlers
 			return;
 		}
 
 		try {
+			console.log(`[EisenhowerMatrixView] handleTaskDrop: taskPath=${taskPath}, fromQuadrant=${sourceQuadrant}, targetQuadrant=${targetQuadrant}`);
+			
+			// Set flags BEFORE updating task to prevent onDataUpdated() from triggering a full refresh
+			// We'll update the UI selectively instead
+			// We expect 2 onDataUpdated() calls: one from file save, one from config.set()
+			// Skip BOTH to avoid any refresh - the selective update handles the UI
+			// Use both instance and static flags (in case view is recreated)
+			this.justDidSelectiveUpdate = true;
+			this.skipDataUpdateCount = 2; // Skip both onDataUpdated() calls
+			
+			// Set static timestamp and counter (persists across instance recreations)
+			EisenhowerMatrixView.lastSelectiveUpdateTime = Date.now();
+			EisenhowerMatrixView.skipDataUpdateCount = 2; // Skip both
+			console.log("[EisenhowerMatrixView] Set static flags (drag), timestamp:", EisenhowerMatrixView.lastSelectiveUpdateTime, "skipCount:", EisenhowerMatrixView.skipDataUpdateCount);
+			
+			// Clear any pending debounce timer to prevent a quick refresh
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+				console.log("[EisenhowerMatrixView] Cleared pending dataUpdateDebounceTimer before selective update");
+			}
+			
 			const task = this.taskInfoCache.get(taskPath);
+			let updatedTask: TaskInfo;
+			
+			// IMPORTANT: Remove from old quadrant BEFORE updating task tags
+			// Use the sourceQuadrant (it may have been cleared by now)
+			if (sourceQuadrant && sourceQuadrant !== targetQuadrant) {
+				console.log(`[EisenhowerMatrixView] Attempting to remove task ${taskPath} from quadrant ${sourceQuadrant}`);
+				await this.updateQuadrantSelectivelyByPath(sourceQuadrant, taskPath, 'remove');
+			} else {
+				console.log(`[EisenhowerMatrixView] No sourceQuadrant or same quadrant, skipping removal. sourceQuadrant=${sourceQuadrant}, targetQuadrant=${targetQuadrant}`);
+			}
+			
 			if (!task) {
 				// Try to load the task if not in cache
 				const file = this.app.vault.getAbstractFileByPath(taskPath);
@@ -1143,16 +1453,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				if (!loadedTask) return;
 				
 				await this.updateTaskTagsForQuadrant(loadedTask, targetQuadrant);
+				updatedTask = loadedTask;
 			} else {
 				await this.updateTaskTagsForQuadrant(task, targetQuadrant);
+				updatedTask = task;
 			}
 
+			// Update UI selectively - add to new quadrant
+			await this.updateQuadrantSelectively(targetQuadrant, updatedTask, 'add');
+
 			// Clear ordering for the old quadrant and assign new order in target quadrant
-			if (this.draggedFromQuadrant) {
-				const oldOrdering = this.quadrantOrderings.get(this.draggedFromQuadrant);
+			// Use the sourceQuadrant
+			if (sourceQuadrant && sourceQuadrant !== targetQuadrant) {
+				const oldOrdering = this.quadrantOrderings.get(sourceQuadrant);
 				if (oldOrdering) {
 					oldOrdering.delete(taskPath);
-					this.saveQuadrantOrderings();
 				}
 			}
 
@@ -1167,12 +1482,274 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				? Math.max(...Array.from(targetOrdering.values()))
 				: -1;
 			targetOrdering.set(taskPath, maxOrder + 1);
-			this.saveQuadrantOrderings();
-
-			// Refresh to show updated position
-			this.debouncedRefresh();
+			
+			// Don't save ordering here - will be saved on unload
+			// This prevents config.set() from triggering refreshes
+			
+			// Ensure view is still visible after selective update
+			// Check after a short delay to catch any clearing that happens asynchronously
+			// Also check after config.set() completes (which triggers the second onDataUpdated)
+			setTimeout(() => {
+				if (!this.matrixContainer || !this.matrixContainer.isConnected || 
+				    !this.rootElement?.contains(this.matrixContainer)) {
+					console.log("[EisenhowerMatrixView] View was cleared after selective update, forcing render");
+					// Don't clear flags here - they need to stay active for the second onDataUpdated()
+					// Just force a render to restore the view
+					this.render();
+				}
+			}, 500); // Longer delay to catch config.set() trigger
 		} catch (error) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error updating task:", error);
+			// Clear flags on error so view can refresh normally
+			this.justDidSelectiveUpdate = false;
+			this.skipDataUpdateCount = 0;
+			EisenhowerMatrixView.lastSelectiveUpdateTime = 0;
+			EisenhowerMatrixView.skipDataUpdateCount = 0;
+		}
+	}
+
+	/**
+	 * Selectively update a quadrant by removing a task by path (more reliable)
+	 */
+	private async updateQuadrantSelectivelyByPath(quadrantId: Quadrant, taskPath: string, action: 'remove'): Promise<void> {
+		if (!this.matrixContainer) return;
+
+		const quadrant = this.matrixContainer.querySelector(`.eisenhower-matrix__quadrant--${quadrantId}`);
+		if (!quadrant) return;
+
+		const tasksContainer = quadrant.querySelector('.eisenhower-matrix__quadrant-tasks') as HTMLElement;
+		if (!tasksContainer) return;
+
+		const header = quadrant.querySelector('.eisenhower-matrix__quadrant-header');
+		const countSpan = header?.querySelector('.eisenhower-matrix__quadrant-count');
+
+		if (action === 'remove') {
+			// Remove the task card by path
+			console.log(`[EisenhowerMatrixView] updateQuadrantSelectivelyByPath: Looking for task ${taskPath} in quadrant ${quadrantId}`);
+			
+			// First, get all wrappers to see what we have
+			const allWrappers = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper');
+			console.log(`[EisenhowerMatrixView] Found ${allWrappers.length} card wrappers in quadrant ${quadrantId}`);
+			
+			// Log all paths for debugging
+			const allPaths: string[] = [];
+			allWrappers.forEach((wrapper) => {
+				const path = (wrapper as HTMLElement).getAttribute('data-task-path');
+				if (path) allPaths.push(path);
+			});
+			console.log(`[EisenhowerMatrixView] All paths in quadrant:`, allPaths);
+			
+			let cardWrapper = tasksContainer.querySelector(`[data-task-path="${CSS.escape(taskPath)}"]`) as HTMLElement;
+			
+			// If not found with CSS.escape, try without escaping
+			if (!cardWrapper) {
+				cardWrapper = tasksContainer.querySelector(`[data-task-path="${taskPath}"]`) as HTMLElement;
+			}
+			
+			// If still not found, try finding by iterating through all wrappers
+			if (!cardWrapper) {
+				for (const wrapper of allWrappers) {
+					const path = (wrapper as HTMLElement).getAttribute('data-task-path');
+					if (path === taskPath) {
+						cardWrapper = wrapper as HTMLElement;
+						break;
+					}
+				}
+			}
+			
+			if (cardWrapper) {
+				// Also remove the drop zone after it if it exists
+				const nextSibling = cardWrapper.nextElementSibling;
+				if (nextSibling && nextSibling.classList.contains('eisenhower-matrix__drop-zone')) {
+					nextSibling.remove();
+				}
+				// Also check for drop zone before it
+				const prevSibling = cardWrapper.previousElementSibling;
+				if (prevSibling && prevSibling.classList.contains('eisenhower-matrix__drop-zone')) {
+					prevSibling.remove();
+				}
+				cardWrapper.remove();
+				console.log(`[EisenhowerMatrixView] ✓ Successfully removed task from quadrant ${quadrantId}: ${taskPath}`);
+			} else {
+				console.warn(`[EisenhowerMatrixView] ✗ Could not find task card to remove: ${taskPath} from quadrant ${quadrantId}`);
+				console.warn(`[EisenhowerMatrixView] Available paths:`, allPaths);
+			}
+
+			// Update count
+			if (countSpan) {
+				const currentCount = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper').length;
+				countSpan.textContent = `(${currentCount})`;
+			}
+
+			// If quadrant is now empty, show empty state
+			if (tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper').length === 0) {
+				const existingEmpty = tasksContainer.querySelector('.eisenhower-matrix__quadrant-empty');
+				if (!existingEmpty) {
+					const empty = document.createElement("div");
+					empty.className = "eisenhower-matrix__quadrant-empty";
+					empty.style.cssText = `
+						padding: 20px;
+						text-align: center;
+						color: var(--text-muted);
+						font-size: 12px;
+					`;
+					empty.textContent = "No tasks";
+					tasksContainer.appendChild(empty);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Selectively update a quadrant by adding or removing a task without full refresh
+	 */
+	private async updateQuadrantSelectively(quadrantId: Quadrant, task: TaskInfo, action: 'add' | 'remove'): Promise<void> {
+		if (!this.matrixContainer) return;
+
+		const quadrant = this.matrixContainer.querySelector(`.eisenhower-matrix__quadrant--${quadrantId}`);
+		if (!quadrant) return;
+
+		const tasksContainer = quadrant.querySelector('.eisenhower-matrix__quadrant-tasks') as HTMLElement;
+		if (!tasksContainer) return;
+
+		const header = quadrant.querySelector('.eisenhower-matrix__quadrant-header');
+		const countSpan = header?.querySelector('.eisenhower-matrix__quadrant-count');
+
+		if (action === 'remove') {
+			// Remove the task card
+			// Try multiple approaches to find the card
+			let cardWrapper = tasksContainer.querySelector(`[data-task-path="${CSS.escape(task.path)}"]`) as HTMLElement;
+			
+			// If not found with CSS.escape, try without escaping
+			if (!cardWrapper) {
+				cardWrapper = tasksContainer.querySelector(`[data-task-path="${task.path}"]`) as HTMLElement;
+			}
+			
+			// If still not found, try finding by iterating through all wrappers
+			if (!cardWrapper) {
+				const allWrappers = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper');
+				for (const wrapper of allWrappers) {
+					const path = (wrapper as HTMLElement).getAttribute('data-task-path');
+					if (path === task.path) {
+						cardWrapper = wrapper as HTMLElement;
+						break;
+					}
+				}
+			}
+			
+			if (cardWrapper) {
+				// Also remove the drop zone after it if it exists
+				const nextSibling = cardWrapper.nextElementSibling;
+				if (nextSibling && nextSibling.classList.contains('eisenhower-matrix__drop-zone')) {
+					nextSibling.remove();
+				}
+				// Also check for drop zone before it
+				const prevSibling = cardWrapper.previousElementSibling;
+				if (prevSibling && prevSibling.classList.contains('eisenhower-matrix__drop-zone')) {
+					prevSibling.remove();
+				}
+				cardWrapper.remove();
+			} else {
+				console.warn(`[EisenhowerMatrixView] Could not find task card to remove: ${task.path}`);
+			}
+
+			// Update count
+			if (countSpan) {
+				const currentCount = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper').length;
+				countSpan.textContent = `(${currentCount})`;
+			}
+
+			// If quadrant is now empty, show empty state
+			if (tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper').length === 0) {
+				const existingEmpty = tasksContainer.querySelector('.eisenhower-matrix__quadrant-empty');
+				if (!existingEmpty) {
+					const empty = document.createElement("div");
+					empty.className = "eisenhower-matrix__quadrant-empty";
+					empty.style.cssText = `
+						padding: 20px;
+						text-align: center;
+						color: var(--text-muted);
+						font-size: 12px;
+					`;
+					empty.textContent = "No tasks";
+					tasksContainer.appendChild(empty);
+				}
+			}
+		} else if (action === 'add') {
+			// Remove empty state if present
+			const empty = tasksContainer.querySelector('.eisenhower-matrix__quadrant-empty');
+			if (empty) {
+				empty.remove();
+			}
+
+			// Get ordering to determine position
+			const ordering = this.quadrantOrderings.get(quadrantId);
+			const taskOrder = ordering?.get(task.path) ?? -1;
+
+			// Find the right position to insert
+			const cardWrappers = Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper'));
+			let insertIndex = cardWrappers.length; // Default to end
+
+			if (taskOrder >= 0 && ordering) {
+				// Find position based on ordering
+				for (let i = 0; i < cardWrappers.length; i++) {
+					const wrapper = cardWrappers[i] as HTMLElement;
+					const path = wrapper.getAttribute('data-task-path');
+					const order = path ? ordering.get(path) ?? -1 : -1;
+					if (order > taskOrder) {
+						insertIndex = i;
+						break;
+					}
+				}
+			}
+
+			// Create the card
+			const visibleProperties = this.getVisibleProperties();
+			const cardOptions = this.getCardOptions();
+			const cardWrapper = document.createElement("div");
+			cardWrapper.className = "eisenhower-matrix__card-wrapper";
+			cardWrapper.setAttribute("draggable", "true");
+			cardWrapper.setAttribute("data-task-path", task.path);
+			
+			const card = createTaskCard(task, this.plugin, visibleProperties, cardOptions);
+			cardWrapper.appendChild(card);
+			this.taskInfoCache.set(task.path, task);
+			
+			// Setup drag handlers
+			this.setupCardDragHandlers(cardWrapper, task, quadrantId);
+			
+			// Setup context menu with Eisenhower zone options
+			this.setupTaskContextMenu(cardWrapper, task);
+
+			// Insert at the right position
+			if (insertIndex === 0) {
+				// Insert at beginning (after first drop zone if it exists)
+				const firstDropZone = tasksContainer.querySelector('.eisenhower-matrix__drop-zone');
+				if (firstDropZone && firstDropZone.nextSibling) {
+					tasksContainer.insertBefore(cardWrapper, firstDropZone.nextSibling);
+				} else {
+					tasksContainer.insertBefore(cardWrapper, tasksContainer.firstChild);
+				}
+				// Add drop zone after this card
+				this.createDropZone(tasksContainer, quadrantId, task.path, 1);
+			} else if (insertIndex >= cardWrappers.length) {
+				// Insert at end
+				tasksContainer.appendChild(cardWrapper);
+				// Add drop zone after this card
+				this.createDropZone(tasksContainer, quadrantId, task.path, cardWrappers.length + 1);
+			} else {
+				// Insert in middle
+				const targetWrapper = cardWrappers[insertIndex] as HTMLElement;
+				tasksContainer.insertBefore(cardWrapper, targetWrapper);
+				// Add drop zone after this card
+				this.createDropZone(tasksContainer, quadrantId, task.path, insertIndex + 1);
+			}
+
+			// Update count
+			if (countSpan) {
+				const currentCount = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper').length;
+				countSpan.textContent = `(${currentCount})`;
+			}
 		}
 	}
 
@@ -1242,6 +1819,197 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		});
 	}
 
+	/**
+	 * Setup context menu for a task card with Eisenhower zone options
+	 */
+	private setupTaskContextMenu(cardWrapper: HTMLElement, task: TaskInfo): void {
+		// Find the actual task card element (it might be nested inside the wrapper)
+		const card = cardWrapper.querySelector(".task-card") || cardWrapper;
+		
+		card.addEventListener("contextmenu", async (e: MouseEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			
+			// Get fresh task data
+			const freshTask = await this.plugin.cacheManager.getTaskInfo(task.path);
+			if (!freshTask) {
+				console.error("[EisenhowerMatrixView] Task not found:", task.path);
+				return;
+			}
+			
+			// Create standard task context menu
+			const { TaskContextMenu } = await import("../components/TaskContextMenu");
+			const taskMenu = new TaskContextMenu({
+				task: freshTask,
+				plugin: this.plugin,
+				targetDate: this.getCardOptions().targetDate,
+				onUpdate: () => {
+					// Trigger refresh of views
+					this.plugin.app.workspace.trigger("tasknotes:refresh-views");
+				},
+			});
+			
+			// Access the underlying menu to add our items
+			const menu = (taskMenu as any).menu as any;
+			
+			// Add "Move to Eisenhower zone" submenu at the top
+			menu.addItem((item: any) => {
+				item.setTitle("Move to Eisenhower zone");
+				item.setIcon("move");
+				
+				const submenu = (item as any).setSubmenu();
+				
+				// Define quadrant options
+				const quadrantOptions: Array<{ quadrant: Quadrant; label: string; icon?: string }> = [
+					{ quadrant: "urgent-important", label: "Do", icon: "zap" },
+					{ quadrant: "not-urgent-important", label: "Decide", icon: "calendar" },
+					{ quadrant: "urgent-not-important", label: "Delegate", icon: "user" },
+					{ quadrant: "not-urgent-not-important", label: "Defer", icon: "clock" },
+					{ quadrant: "holding-pen", label: "Uncategorized", icon: "list" },
+					{ quadrant: "excluded", label: "Excluded", icon: "x" },
+				];
+				
+				// Add menu items for each quadrant
+				for (const option of quadrantOptions) {
+					submenu.addItem((subItem: any) => {
+						subItem.setTitle(option.label);
+						if (option.icon) {
+							subItem.setIcon(option.icon);
+						}
+						subItem.onClick(async () => {
+							try {
+								// Set flags BEFORE updating task to prevent onDataUpdated() from triggering a full refresh
+								// We expect 2 onDataUpdated() calls: one from file save, one from config.set()
+								// Skip BOTH to avoid any refresh - the selective update handles the UI
+								// Use both instance and static flags (in case view is recreated)
+								this.justDidSelectiveUpdate = true;
+								this.skipDataUpdateCount = 2; // Skip both onDataUpdated() calls
+								
+								// Set static timestamp and counter (persists across instance recreations)
+								EisenhowerMatrixView.lastSelectiveUpdateTime = Date.now();
+								EisenhowerMatrixView.skipDataUpdateCount = 2; // Skip both
+								console.log("[EisenhowerMatrixView] Set static flags (context menu), timestamp:", EisenhowerMatrixView.lastSelectiveUpdateTime, "skipCount:", EisenhowerMatrixView.skipDataUpdateCount);
+								
+								// Clear any pending debounce timer to prevent a quick refresh
+								if ((this as any).dataUpdateDebounceTimer) {
+									clearTimeout((this as any).dataUpdateDebounceTimer);
+									(this as any).dataUpdateDebounceTimer = null;
+									console.log("[EisenhowerMatrixView] Cleared pending dataUpdateDebounceTimer before selective update (context menu)");
+								}
+								
+								// Get fresh task data again
+								const updatedTask = await this.plugin.cacheManager.getTaskInfo(task.path);
+								if (!updatedTask) {
+									console.error("[EisenhowerMatrixView] Task not found:", task.path);
+									return;
+								}
+								
+								// Determine current quadrant from task tags (before update)
+								const currentQuadrant = this.getQuadrantForTask(updatedTask);
+								
+								// IMPORTANT: Remove from old quadrant BEFORE updating task tags
+								// Use the original task to find it in the old quadrant
+								if (currentQuadrant && currentQuadrant !== option.quadrant) {
+									await this.updateQuadrantSelectively(currentQuadrant, updatedTask, 'remove');
+								}
+								
+								// Update task tags for the target quadrant
+								await this.updateTaskTagsForQuadrant(updatedTask, option.quadrant);
+								
+								// Get fresh task data after update to ensure we have the latest tags
+								const finalTask = await this.plugin.cacheManager.getTaskInfo(task.path);
+								if (!finalTask) return;
+								
+								// Update ordering - remove from old quadrant, add to new
+								if (currentQuadrant && currentQuadrant !== option.quadrant) {
+									// Update UI selectively - remove from old quadrant
+									await this.updateQuadrantSelectively(currentQuadrant, updatedTask, 'remove');
+									
+									const oldOrdering = this.quadrantOrderings.get(currentQuadrant);
+									if (oldOrdering) {
+										oldOrdering.delete(task.path);
+									}
+								}
+								
+								// Add to end of target quadrant's ordering
+								let targetOrdering = this.quadrantOrderings.get(option.quadrant);
+								if (!targetOrdering) {
+									targetOrdering = new Map();
+									this.quadrantOrderings.set(option.quadrant, targetOrdering);
+								}
+								const maxOrder = targetOrdering.size > 0 
+									? Math.max(...Array.from(targetOrdering.values()))
+									: -1;
+								targetOrdering.set(task.path, maxOrder + 1);
+								
+								// Update UI selectively - add to new quadrant
+								await this.updateQuadrantSelectively(option.quadrant, finalTask, 'add');
+								
+								// Don't save ordering here - will be saved on unload
+								// This prevents config.set() from triggering refreshes
+								
+								// Ensure view is still visible after selective update
+								// Check after a short delay to catch any clearing that happens asynchronously
+								// Also check after config.set() completes (which triggers the second onDataUpdated)
+								setTimeout(() => {
+									if (!this.matrixContainer || !this.matrixContainer.isConnected || 
+									    !this.rootElement?.contains(this.matrixContainer)) {
+										console.log("[EisenhowerMatrixView] View was cleared after selective update (context menu), forcing render");
+										// Don't clear flags here - they need to stay active for the second onDataUpdated()
+										// Just force a render to restore the view
+										this.render();
+									}
+								}, 500); // Longer delay to catch config.set() trigger
+							} catch (error) {
+								console.error("[TaskNotes][EisenhowerMatrixView] Error moving task:", error);
+								// Clear flags on error so view can refresh normally
+								this.justDidSelectiveUpdate = false;
+								this.skipDataUpdateCount = 0;
+								EisenhowerMatrixView.lastSelectiveUpdateTime = 0;
+								EisenhowerMatrixView.skipDataUpdateCount = 0;
+							}
+						});
+					});
+				}
+			});
+			
+			taskMenu.show(e);
+		});
+	}
+
+	/**
+	 * Get the quadrant for a task based on its tags
+	 */
+	private getQuadrantForTask(task: TaskInfo): Quadrant | null {
+		const hasYImportant = this.hasTag(task, "yImportant");
+		const hasNImportant = this.hasTag(task, "nImportant");
+		const hasYUrgent = this.hasTag(task, "yUrgent");
+		const hasNUrgent = this.hasTag(task, "nUrgent");
+		const hasExcluded = this.hasTag(task, "excluded");
+
+		if (hasExcluded) {
+			return "excluded";
+		}
+
+		const hasAnyTag = hasYImportant || hasNImportant || hasYUrgent || hasNUrgent;
+		if (!hasAnyTag) {
+			return "holding-pen";
+		}
+
+		const isUrgent = hasYUrgent && !hasNUrgent;
+		const isImportant = hasYImportant && !hasNImportant;
+
+		if (isUrgent && isImportant) {
+			return "urgent-important";
+		} else if (isUrgent && !isImportant) {
+			return "urgent-not-important";
+		} else if (!isUrgent && isImportant) {
+			return "not-urgent-important";
+		} else {
+			return "not-urgent-not-important";
+		}
+	}
+
 	private destroyQuadrantScrollers(): void {
 		for (const scroller of this.quadrantScrollers.values()) {
 			scroller.destroy();
@@ -1256,7 +2024,17 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		// Clean up virtual scrollers
 		this.destroyQuadrantScrollers();
 		this.taskInfoCache.clear();
+		
+		// Save quadrant orderings on unload (safe here, won't trigger view recreation)
+		this.saveQuadrantOrderings();
+		
+		// Save collapsed state on unload (safe here, won't trigger view recreation)
+		this.saveCollapsedState();
+		
 		this.matrixContainer = null;
+		
+		// Note: Don't clear static flags here - they're global and may be needed by a new instance
+		// They'll expire naturally after SELECTIVE_UPDATE_WINDOW_MS
 	}
 }
 
