@@ -31,6 +31,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	private draggedFromQuadrant: Quadrant | null = null;
 	private quadrantOrderings: Map<Quadrant, Map<string, number>> = new Map();
 	private collapsedSections: Set<Quadrant> = new Set(); // Track collapsed sections (holding-pen, excluded)
+	private isUnloading = false; // Flag to prevent multiple save attempts during unload
 	
 	// Static timestamp-based approach to persist flags across view instance recreations
 	// Uses a global timestamp that's checked within a short window (3 seconds)
@@ -221,14 +222,34 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
-	 * Load quadrant orderings from BasesViewConfig
+	 * Load quadrant orderings from BasesViewConfig or localStorage fallback
 	 */
 	private loadQuadrantOrderings(): void {
 		this.quadrantOrderings.clear();
 		
+		let orderingsJson: string | null = null;
+		
+		// Try to load from Bases config first
 		try {
-			const orderingsJson = this.config?.get?.('quadrantOrderings');
-			if (orderingsJson && typeof orderingsJson === 'string') {
+			orderingsJson = this.config?.get?.('quadrantOrderings');
+		} catch (error) {
+			console.warn('[EisenhowerMatrixView] Failed to load quadrant orderings from Bases config, trying localStorage:', error);
+		}
+		
+		// Fallback to localStorage if config.get() failed or returned nothing
+		if ((!orderingsJson || typeof orderingsJson !== 'string') && this.app) {
+			try {
+				const storageKey = `tasknotes-eisenhower-quadrant-orderings-${this.containerEl?.getAttribute('data-view-id') || 'default'}`;
+				const stored = this.app.loadLocalStorage(storageKey);
+				orderingsJson = (typeof stored === 'string' ? stored : null);
+			} catch (localStorageError) {
+				console.warn('[EisenhowerMatrixView] Failed to load quadrant orderings from localStorage:', localStorageError);
+			}
+		}
+		
+		// Parse and load the orderings
+		if (orderingsJson && typeof orderingsJson === 'string') {
+			try {
 				const orderings = JSON.parse(orderingsJson);
 				for (const [quadrantId, taskOrderMap] of Object.entries(orderings)) {
 					if (typeof taskOrderMap === 'object' && taskOrderMap !== null) {
@@ -238,51 +259,204 @@ export class EisenhowerMatrixView extends BasesViewBase {
 						);
 					}
 				}
+			} catch (parseError) {
+				console.error('[EisenhowerMatrixView] Failed to parse quadrant orderings:', parseError);
 			}
-		} catch (error) {
-			console.error('[EisenhowerMatrixView] Failed to load quadrant orderings:', error);
 		}
 	}
 
 	/**
 	 * Save quadrant orderings to BasesViewConfig
 	 */
+	/**
+	 * Validate that data contains only plain serializable values (strings, numbers, booleans, arrays, plain objects)
+	 * This helps prevent circular reference errors when saving to config
+	 */
+	private validateSerializable(data: any, path: string = 'root'): boolean {
+		if (data === null || data === undefined) {
+			return true;
+		}
+		const type = typeof data;
+		if (type === 'string' || type === 'number' || type === 'boolean') {
+			return true;
+		}
+		if (type === 'function' || type === 'symbol') {
+			console.warn(`[EisenhowerMatrixView] Non-serializable ${type} found at ${path}`);
+			return false;
+		}
+		if (Array.isArray(data)) {
+			return data.every((item, index) => this.validateSerializable(item, `${path}[${index}]`));
+		}
+		if (type === 'object') {
+			// Check for Map, Set, or other non-plain objects
+			if (data instanceof Map || data instanceof Set || data instanceof Date || data instanceof RegExp) {
+				console.warn(`[EisenhowerMatrixView] Non-serializable object type found at ${path}:`, data.constructor.name);
+				return false;
+			}
+			// Check for circular references by validating all properties
+			for (const key in data) {
+				if (Object.prototype.hasOwnProperty.call(data, key)) {
+					if (!this.validateSerializable(data[key], `${path}.${key}`)) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+		return false;
+	}
+
 	private saveQuadrantOrderings(): void {
 		try {
 			const orderings: Record<string, Record<string, number>> = {};
 			for (const [quadrantId, taskOrderMap] of this.quadrantOrderings.entries()) {
-				orderings[quadrantId] = Object.fromEntries(taskOrderMap);
+				// Ensure we're only storing plain objects with string keys and number values
+				if (taskOrderMap && taskOrderMap instanceof Map) {
+					const plainObject: Record<string, number> = {};
+					for (const [path, order] of taskOrderMap.entries()) {
+						// Validate that path is a string and order is a number
+						if (typeof path === 'string' && typeof order === 'number' && !isNaN(order)) {
+							plainObject[path] = order;
+						} else {
+							console.warn(`[EisenhowerMatrixView] Skipping invalid ordering entry: path=${typeof path}, order=${typeof order}`);
+						}
+					}
+					orderings[quadrantId] = plainObject;
+				}
 			}
-			const orderingsJson = JSON.stringify(orderings);
-			this.config?.set?.('quadrantOrderings', orderingsJson);
+			
+			// Validate the data structure before stringifying
+			if (!this.validateSerializable(orderings, 'orderings')) {
+				console.error('[EisenhowerMatrixView] Orderings data contains non-serializable values, skipping save');
+				return;
+			}
+			
+			// Stringify with circular reference protection
+			let orderingsJson: string;
+			try {
+				orderingsJson = JSON.stringify(orderings);
+			} catch (stringifyError) {
+				console.error('[EisenhowerMatrixView] Failed to stringify quadrant orderings:', stringifyError);
+				return;
+			}
+			
+			// Try to save to Bases config first, fallback to localStorage if it fails
+			let savedToConfig = false;
+			if (this.config && typeof this.config.set === 'function') {
+				try {
+					this.config.set('quadrantOrderings', orderingsJson);
+					savedToConfig = true;
+				} catch (setError: any) {
+					// Check if it's a circular reference error - this is a known Bases issue
+					// Silently fall back to localStorage without logging (to reduce console noise)
+					const isCircularRef = setError?.message?.includes('circular') || setError?.message?.includes('Maximum call stack');
+					if (!isCircularRef) {
+						// Only log non-circular-reference errors
+						console.warn('[EisenhowerMatrixView] Failed to save quadrant orderings to Bases config, falling back to localStorage:', setError);
+					}
+				}
+			}
+			
+			// Fallback to localStorage if config.set() failed or isn't available
+			if (!savedToConfig && this.app) {
+				try {
+					const storageKey = `tasknotes-eisenhower-quadrant-orderings-${this.containerEl?.getAttribute('data-view-id') || 'default'}`;
+					this.app.saveLocalStorage(storageKey, orderingsJson);
+				} catch (localStorageError) {
+					console.error('[EisenhowerMatrixView] Failed to save quadrant orderings to localStorage:', localStorageError);
+				}
+			}
 		} catch (error) {
 			console.error('[EisenhowerMatrixView] Failed to save quadrant orderings:', error);
 		}
 	}
 
 	/**
-	 * Load collapsed state from BasesViewConfig
+	 * Load collapsed state from BasesViewConfig or localStorage fallback
 	 */
 	private loadCollapsedState(): void {
+		let collapsedJson: string | null = null;
+		
+		// Try to load from Bases config first
 		try {
-			const collapsedJson = this.config?.get?.('collapsedSections');
-			if (collapsedJson && typeof collapsedJson === 'string') {
+			collapsedJson = this.config?.get?.('collapsedSections');
+		} catch (error) {
+			console.warn('[EisenhowerMatrixView] Failed to load collapsed state from Bases config, trying localStorage:', error);
+		}
+		
+		// Fallback to localStorage if config.get() failed or returned nothing
+		if ((!collapsedJson || typeof collapsedJson !== 'string') && this.app) {
+			try {
+				const storageKey = `tasknotes-eisenhower-collapsed-sections-${this.containerEl?.getAttribute('data-view-id') || 'default'}`;
+				const stored = this.app.loadLocalStorage(storageKey);
+				collapsedJson = (typeof stored === 'string' ? stored : null);
+			} catch (localStorageError) {
+				console.warn('[EisenhowerMatrixView] Failed to load collapsed state from localStorage:', localStorageError);
+			}
+		}
+		
+		// Parse and load the collapsed state
+		if (collapsedJson && typeof collapsedJson === 'string') {
+			try {
 				const collapsed: string[] = JSON.parse(collapsedJson);
 				this.collapsedSections = new Set(collapsed as Quadrant[]);
+			} catch (parseError) {
+				console.error('[EisenhowerMatrixView] Failed to parse collapsed state:', parseError);
 			}
-		} catch (error) {
-			console.error('[EisenhowerMatrixView] Failed to load collapsed state:', error);
 		}
 	}
 
 	/**
-	 * Save collapsed state to BasesViewConfig
+	 * Save collapsed state to BasesViewConfig or localStorage fallback
 	 */
 	private saveCollapsedState(): void {
 		try {
-			const collapsedArray = Array.from(this.collapsedSections);
-			const collapsedJson = JSON.stringify(collapsedArray);
-			this.config?.set?.('collapsedSections', collapsedJson);
+			// Convert Set to plain array of Quadrant strings, ensuring all are valid strings
+			const collapsedArray = Array.from(this.collapsedSections).filter(
+				(item): item is Quadrant => typeof item === 'string'
+			);
+			
+			// Validate the data structure before stringifying
+			if (!this.validateSerializable(collapsedArray, 'collapsedArray')) {
+				console.error('[EisenhowerMatrixView] Collapsed state data contains non-serializable values, skipping save');
+				return;
+			}
+			
+			// Stringify with error handling
+			let collapsedJson: string;
+			try {
+				collapsedJson = JSON.stringify(collapsedArray);
+			} catch (stringifyError) {
+				console.error('[EisenhowerMatrixView] Failed to stringify collapsed state:', stringifyError);
+				return;
+			}
+			
+			// Try to save to Bases config first, fallback to localStorage if it fails
+			let savedToConfig = false;
+			if (this.config && typeof this.config.set === 'function') {
+				try {
+					this.config.set('collapsedSections', collapsedJson);
+					savedToConfig = true;
+				} catch (setError: any) {
+					// Check if it's a circular reference error - this is a known Bases issue
+					// Silently fall back to localStorage without logging (to reduce console noise)
+					const isCircularRef = setError?.message?.includes('circular') || setError?.message?.includes('Maximum call stack');
+					if (!isCircularRef) {
+						// Only log non-circular-reference errors
+						console.warn('[EisenhowerMatrixView] Failed to save collapsed state to Bases config, falling back to localStorage:', setError);
+					}
+				}
+			}
+			
+			// Fallback to localStorage if config.set() failed or isn't available
+			if (!savedToConfig && this.app) {
+				try {
+					const storageKey = `tasknotes-eisenhower-collapsed-sections-${this.containerEl?.getAttribute('data-view-id') || 'default'}`;
+					this.app.saveLocalStorage(storageKey, collapsedJson);
+				} catch (localStorageError) {
+					console.error('[EisenhowerMatrixView] Failed to save collapsed state to localStorage:', localStorageError);
+				}
+			}
 		} catch (error) {
 			console.error('[EisenhowerMatrixView] Failed to save collapsed state:', error);
 		}
@@ -2021,15 +2195,31 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 * Component lifecycle: Called when component is unloaded.
 	 */
 	onunload(): void {
+		// Prevent multiple save attempts if onunload() is called multiple times
+		if (this.isUnloading) {
+			return;
+		}
+		this.isUnloading = true;
+		
 		// Clean up virtual scrollers
 		this.destroyQuadrantScrollers();
 		this.taskInfoCache.clear();
 		
 		// Save quadrant orderings on unload (safe here, won't trigger view recreation)
-		this.saveQuadrantOrderings();
+		// Use try-catch to prevent errors from interrupting cleanup
+		try {
+			this.saveQuadrantOrderings();
+		} catch (error) {
+			console.warn('[EisenhowerMatrixView] Error saving quadrant orderings during unload:', error);
+		}
 		
 		// Save collapsed state on unload (safe here, won't trigger view recreation)
-		this.saveCollapsedState();
+		// Use try-catch to prevent errors from interrupting cleanup
+		try {
+			this.saveCollapsedState();
+		} catch (error) {
+			console.warn('[EisenhowerMatrixView] Error saving collapsed state during unload:', error);
+		}
 		
 		this.matrixContainer = null;
 		
