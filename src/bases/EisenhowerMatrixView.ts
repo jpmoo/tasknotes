@@ -20,9 +20,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private readonly VIRTUAL_SCROLL_THRESHOLD = 50;
 	/**
-	 * Fixed height for quadrants: 400px content + 50px header = 450px total
+	 * Fixed height for quadrants: 350px content + 50px header = 400px total
 	 */
-	private readonly QUADRANT_FIXED_HEIGHT = 450; // pixels (400px content + 50px header)
+	private readonly QUADRANT_FIXED_HEIGHT = 400; // pixels (350px content + 50px header)
 	/**
 	 * Fixed height for uncategorized and excluded regions: 200px total (150px content + 50px header)
 	 */
@@ -43,6 +43,14 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	private justDidSelectiveUpdate = false; // Flag to skip onDataUpdated() if we just updated UI selectively
 	private skipNextDataUpdate = false; // Additional flag to skip the very next onDataUpdated() call
 	private skipDataUpdateCount = 0; // Counter to track how many onDataUpdated() calls to skip
+	private _isFirstDataUpdate = true; // Track first data update for immediate render
+	private _isRendering = false; // Prevent concurrent renders
+	private _pendingRender = false; // Track if render was requested while rendering
+	private _lastDataHash: string | null = null; // Hash of last rendered data to skip unnecessary renders
+	private _orderingsLoaded = false; // Track if orderings have been loaded
+	private _collapsedStateLoaded = false; // Track if collapsed state has been loaded
+	private _lastRenderTime = 0; // Track last render time for throttling
+	private static readonly MIN_RENDER_INTERVAL_MS = 2000; // Minimum 2 seconds between renders (throttle)
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
@@ -61,15 +69,39 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	async render(): Promise<void> {
-		if (!this.rootElement) return;
+		// Skip rendering if view is not visible (saves CPU for background tabs)
+		if (!this.isViewVisible()) {
+			return;
+		}
+		
+		// Prevent duplicate concurrent renders
+		if (this._isRendering) {
+			this._pendingRender = true;
+			return;
+		}
+
+		this._isRendering = true;
+		this._pendingRender = false;
+
+		if (!this.rootElement) {
+			this._isRendering = false;
+			return;
+		}
 		if (!this.matrixContainer) {
 			// Container not set up yet, try to set it up
 			this.setupContainer();
 		}
-		if (!this.matrixContainer) return;
-		if (!this.data) return;
+		if (!this.matrixContainer) {
+			this._isRendering = false;
+			return;
+		}
+		if (!this.data) {
+			this._isRendering = false;
+			return;
+		}
 		if (!this.data.data || !Array.isArray(this.data.data)) {
 			// Data not ready yet
+			this._isRendering = false;
 			return;
 		}
 
@@ -77,8 +109,35 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const dataItems = this.dataAdapter.extractDataItems();
 			if (!dataItems || dataItems.length === 0) {
 				this.renderEmptyState();
+				this._isRendering = false;
 				return;
 			}
+			
+			// Create a simple hash of the data to detect if it actually changed
+			// This prevents unnecessary full rebuilds when data hasn't changed
+			const dataHash = this.createDataHash(dataItems);
+			if (dataHash === this._lastDataHash && this._lastDataHash !== null) {
+				// Data hasn't changed, skip render
+				this._isRendering = false;
+				return;
+			}
+			this._lastDataHash = dataHash;
+			
+			// Throttle renders to prevent too frequent updates
+			const now = Date.now();
+			const timeSinceLastRender = now - this._lastRenderTime;
+			if (timeSinceLastRender < EisenhowerMatrixView.MIN_RENDER_INTERVAL_MS && this._lastRenderTime > 0) {
+				// Too soon since last render, schedule for later
+				this._isRendering = false;
+				setTimeout(() => {
+					if (this.isViewVisible()) {
+						this.render();
+					}
+				}, EisenhowerMatrixView.MIN_RENDER_INTERVAL_MS - timeSinceLastRender);
+				return;
+			}
+			this._lastRenderTime = now;
+			
 			const taskNotes = await identifyTaskNotesFromBasesData(dataItems, this.plugin);
 
 			// Clean up existing scrollers
@@ -89,12 +148,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 			if (taskNotes.length === 0) {
 				this.renderEmptyState();
+				this._isRendering = false;
 				return;
 			}
 
-			// Load quadrant orderings from config
-			this.loadQuadrantOrderings();
-			this.loadCollapsedState();
+			// Load quadrant orderings from config (only once, then cache)
+			if (!this._orderingsLoaded) {
+				this.loadQuadrantOrderings();
+				this._orderingsLoaded = true;
+			}
+			
+			// Load collapsed state (only once, then cache)
+			if (!this._collapsedStateLoaded) {
+				this.loadCollapsedState();
+				this._collapsedStateLoaded = true;
+			}
 
 			// Categorize tasks into quadrants
 			const quadrants = this.categorizeTasks(taskNotes);
@@ -103,7 +171,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.applyOrderingToQuadrants(quadrants);
 
 			// Render each quadrant - top row: Important quadrants, bottom row: Not Important quadrants
-			// All use fixed height (450px total: 400px content + 50px header) set directly in renderQuadrant
+			// All use fixed height (400px total: 350px content + 50px header) set directly in renderQuadrant
 			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO", false);
 			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE", false);
 			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE", false);
@@ -117,7 +185,46 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
 			this.renderError(error);
+		} finally {
+			this._isRendering = false;
 		}
+
+		// If a render was requested while we were rendering, do it now
+		if (this._pendingRender) {
+			this._pendingRender = false;
+			// Use setTimeout to avoid deep call stack
+			setTimeout(() => this.render(), 0);
+		}
+	}
+
+	/**
+	 * Create a simple hash of data items to detect if data has changed.
+	 * Uses paths and modification times if available.
+	 */
+	private createDataHash(dataItems: any[]): string {
+		if (!dataItems || dataItems.length === 0) {
+			return 'empty';
+		}
+		
+		// Create a simple hash based on paths and count
+		// This is fast and sufficient to detect most changes
+		const paths = dataItems
+			.map(item => item?.path || item?.file?.path || '')
+			.filter(Boolean)
+			.sort()
+			.join('|');
+		
+		const count = dataItems.length;
+		
+		// Include modification times if available (for file change detection)
+		const mtimes = dataItems
+			.map(item => {
+				const stat = item?.stat || item?.file?.stat;
+				return stat?.mtime || 0;
+			})
+			.join(',');
+		
+		return `${count}:${paths.substring(0, 200)}:${mtimes}`;
 	}
 
 	/**
@@ -307,6 +414,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	private saveQuadrantOrderings(): void {
+		// Mark as needing reload on next render
+		this._orderingsLoaded = false;
 		try {
 			const orderings: Record<string, Record<string, number>> = {};
 			for (const [quadrantId, taskOrderMap] of this.quadrantOrderings.entries()) {
@@ -410,6 +519,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 * Save collapsed state to BasesViewConfig or localStorage fallback
 	 */
 	private saveCollapsedState(): void {
+		// Mark as needing reload on next render
+		this._collapsedStateLoaded = false;
 		try {
 			// Convert Set to plain array of Quadrant strings, ensuring all are valid strings
 			const collapsedArray = Array.from(this.collapsedSections).filter(
@@ -628,7 +739,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		quadrant.className = `eisenhower-matrix__quadrant eisenhower-matrix__quadrant--${quadrantId}`;
 		
 		// Base styles for all quadrants
-		// For the four main quadrants, always use fixed height (450px total: 400px content + 50px header)
+		// For the four main quadrants, always use fixed height (400px total: 350px content + 50px header)
 		// For holding-pen and excluded, use their own fixed height
 		const heightForQuadrant = (quadrantId === "holding-pen" || quadrantId === "excluded") 
 			? this.UNCATEGORIZED_FIXED_HEIGHT 
@@ -789,8 +900,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			tasksContainerHeight = `${this.UNCATEGORIZED_FIXED_HEIGHT - headerHeight}px`;
 			overflowSetting = "auto";
 		} else {
-			// Four main quadrants: always use fixed height (400px content) with scrolling
-			tasksContainerHeight = "400px"; // 400px content area
+			// Four main quadrants: always use fixed height (350px content) with scrolling
+			tasksContainerHeight = "350px"; // 350px content area
 			overflowSetting = "auto";
 		}
 		
@@ -967,30 +1078,82 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	/**
+	 * Check if this view is actually visible to the user.
+	 * Returns false if the view is in a background tab, scrolled out of view, or not connected.
+	 */
+	private isViewVisible(): boolean {
+		if (!this.rootElement?.isConnected) {
+			return false;
+		}
+		
+		// Check if the view is in the viewport
+		const rect = this.rootElement.getBoundingClientRect();
+		if (rect.width === 0 && rect.height === 0) {
+			// View has no dimensions, likely hidden
+			return false;
+		}
+		
+		// Check if any parent is hidden (e.g., in a collapsed split or background tab)
+		let element: HTMLElement | null = this.rootElement;
+		while (element) {
+			const style = window.getComputedStyle(element);
+			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+				return false;
+			}
+			element = element.parentElement;
+		}
+		
+		// Check if the view is in an active/visible workspace leaf
+		// For embedded views, check if the containing note is visible
+		const workspaceLeaf = this.containerEl.closest('.workspace-leaf');
+		if (workspaceLeaf) {
+			const isActive = workspaceLeaf.classList.contains('mod-active');
+			// If not active, check if it's at least visible (not in a collapsed split)
+			if (!isActive) {
+				// Check if the leaf is actually visible (not in a collapsed split)
+				const leafRect = workspaceLeaf.getBoundingClientRect();
+				if (leafRect.width === 0 && leafRect.height === 0) {
+					return false;
+				}
+			}
+		}
+		
+		return true;
+	}
+
+	/**
 	 * Override onDataUpdated to skip refresh if we just did a selective update
 	 */
 	onDataUpdated(): void {
+		// Early exit: Skip ALL processing if view is not visible
+		// This prevents unnecessary work for views in background tabs
+		if (!this.isViewVisible()) {
+			// Clear any pending debounce timer since we're not visible
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+			}
+			return;
+		}
+		
 		// Check both instance flags and static timestamp-based flags (in case view was recreated)
-		const now = Date.now();
-		const timeSinceSelectiveUpdate = now - EisenhowerMatrixView.lastSelectiveUpdateTime;
-		const isWithinWindow = timeSinceSelectiveUpdate < EisenhowerMatrixView.SELECTIVE_UPDATE_WINDOW_MS;
-		const staticJustDidSelectiveUpdate = isWithinWindow && EisenhowerMatrixView.lastSelectiveUpdateTime > 0;
 		const staticSkipCount = EisenhowerMatrixView.skipDataUpdateCount;
+		
+		// Only calculate time-based check if we have a valid timestamp
+		let staticJustDidSelectiveUpdate = false;
+		if (EisenhowerMatrixView.lastSelectiveUpdateTime > 0) {
+			const now = Date.now();
+			const timeSinceSelectiveUpdate = now - EisenhowerMatrixView.lastSelectiveUpdateTime;
+			const isWithinWindow = timeSinceSelectiveUpdate < EisenhowerMatrixView.SELECTIVE_UPDATE_WINDOW_MS;
+			staticJustDidSelectiveUpdate = isWithinWindow;
+		}
 		
 		const justDidSelectiveUpdate = this.justDidSelectiveUpdate || staticJustDidSelectiveUpdate;
 		const skipDataUpdateCount = this.skipDataUpdateCount + staticSkipCount;
-		
-		console.log("[EisenhowerMatrixView] onDataUpdated called, timeSinceSelectiveUpdate:", timeSinceSelectiveUpdate, "ms, instance justDidSelectiveUpdate:", this.justDidSelectiveUpdate, "static justDidSelectiveUpdate:", staticJustDidSelectiveUpdate, "instance skipDataUpdateCount:", this.skipDataUpdateCount, "static skipDataUpdateCount:", staticSkipCount, "combined skipDataUpdateCount:", skipDataUpdateCount);
-		
-		// Skip if view is not visible
-		if (!this.rootElement?.isConnected) {
-			return;
-		}
 
 		// If we just did a selective update, skip ALL refreshes
 		// The UI is already up to date, so we don't need to refresh
 		if (justDidSelectiveUpdate || this.skipNextDataUpdate || skipDataUpdateCount > 0) {
-			console.log("[EisenhowerMatrixView] onDataUpdated - SKIPPING (just did selective update)");
 			
 			// IMPORTANT: Ensure the view is still visible - Bases might have cleared it
 			// Check both rootElement and matrixContainer
@@ -1000,7 +1163,6 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			                    !this.rootElement.contains(this.matrixContainer);
 			
 			if (viewCleared) {
-				console.log("[EisenhowerMatrixView] View was cleared, forcing render. rootElement:", !!this.rootElement?.isConnected, "matrixContainer:", !!this.matrixContainer?.isConnected);
 				// View was cleared, we need to render
 				// But don't clear flags yet - we still need to skip the second onDataUpdated()
 				// Just render directly without going through onDataUpdated()
@@ -1009,14 +1171,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 			
 			// Update both instance and static flags
-			let newSkipCount = skipDataUpdateCount;
-			if (newSkipCount > 0) {
-				newSkipCount--;
+			if (skipDataUpdateCount > 0) {
 				this.skipDataUpdateCount = Math.max(0, this.skipDataUpdateCount - 1);
 				if (EisenhowerMatrixView.skipDataUpdateCount > 0) {
 					EisenhowerMatrixView.skipDataUpdateCount--;
 				}
-				console.log("[EisenhowerMatrixView] Decremented skipDataUpdateCount to:", newSkipCount);
 			}
 			
 			// Clear skipNextDataUpdate immediately (one-time skip)
@@ -1029,7 +1188,6 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				setTimeout(() => {
 					this.justDidSelectiveUpdate = false;
 					// Don't clear static timestamp here - let it expire naturally
-					console.log("[EisenhowerMatrixView] Cleared instance justDidSelectiveUpdate flag");
 				}, 2000);
 			}
 			
@@ -1038,24 +1196,60 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			if ((this as any).dataUpdateDebounceTimer) {
 				clearTimeout((this as any).dataUpdateDebounceTimer);
 				(this as any).dataUpdateDebounceTimer = null;
-				console.log("[EisenhowerMatrixView] Cleared pending dataUpdateDebounceTimer");
 			}
 			
 			return;
 		}
 
-		// Otherwise, use the base class behavior (debounced render)
-		super.onDataUpdated();
+		// Otherwise, use longer debounce for external changes (typing in notes)
+		// First data update after load should be immediate (initial data population)
+		if (this._isFirstDataUpdate) {
+			this._isFirstDataUpdate = false;
+			try {
+				this.render();
+			} catch (error) {
+				console.error(`[TaskNotes][${this.type}] Render error:`, error);
+				this.renderError(error as Error);
+			}
+			return;
+		}
+
+		// Clear any existing debounce timer
+		if ((this as any).dataUpdateDebounceTimer) {
+			clearTimeout((this as any).dataUpdateDebounceTimer);
+			(this as any).dataUpdateDebounceTimer = null;
+		}
+
+		// Use longer debounce for external changes (typing in notes)
+		// This prevents excessive re-renders when editing notes with embedded matrix
+		// Increased to 8 seconds for embedded views to reduce CPU usage
+		(this as any).dataUpdateDebounceTimer = window.setTimeout(() => {
+			(this as any).dataUpdateDebounceTimer = null;
+			// Double-check visibility before rendering
+			if (!this.isViewVisible()) {
+				return;
+			}
+			try {
+				this.render();
+			} catch (error) {
+				console.error(`[TaskNotes][${this.type}] Render error:`, error);
+				this.renderError(error as Error);
+			}
+		}, 8000);  // 8 second debounce - longer for embedded views to reduce CPU usage
 	}
 
 	protected async handleTaskUpdate(task: TaskInfo): Promise<void> {
+		// Skip if view is not visible (no point updating hidden views)
+		if (!this.isViewVisible()) {
+			return;
+		}
+		
 		// Update cache
 		this.taskInfoCache.set(task.path, task);
 		
 		// If we just did a selective update, skip this task update too
 		// The UI is already up to date from the selective update
 		if (this.justDidSelectiveUpdate || this.skipDataUpdateCount > 0) {
-			console.log("[EisenhowerMatrixView] handleTaskUpdate - SKIPPING (just did selective update)");
 			return;
 		}
 		
@@ -1699,19 +1893,15 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 		if (action === 'remove') {
 			// Remove the task card by path
-			console.log(`[EisenhowerMatrixView] updateQuadrantSelectivelyByPath: Looking for task ${taskPath} in quadrant ${quadrantId}`);
-			
 			// First, get all wrappers to see what we have
 			const allWrappers = tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper');
-			console.log(`[EisenhowerMatrixView] Found ${allWrappers.length} card wrappers in quadrant ${quadrantId}`);
 			
-			// Log all paths for debugging
+			// Collect all paths for debugging (only used if removal fails)
 			const allPaths: string[] = [];
 			allWrappers.forEach((wrapper) => {
 				const path = (wrapper as HTMLElement).getAttribute('data-task-path');
 				if (path) allPaths.push(path);
 			});
-			console.log(`[EisenhowerMatrixView] All paths in quadrant:`, allPaths);
 			
 			let cardWrapper = tasksContainer.querySelector(`[data-task-path="${CSS.escape(taskPath)}"]`) as HTMLElement;
 			
@@ -1743,7 +1933,6 @@ export class EisenhowerMatrixView extends BasesViewBase {
 					prevSibling.remove();
 				}
 				cardWrapper.remove();
-				console.log(`[EisenhowerMatrixView] ✓ Successfully removed task from quadrant ${quadrantId}: ${taskPath}`);
 			} else {
 				console.warn(`[EisenhowerMatrixView] ✗ Could not find task card to remove: ${taskPath} from quadrant ${quadrantId}`);
 				console.warn(`[EisenhowerMatrixView] Available paths:`, allPaths);
