@@ -287,21 +287,32 @@ export abstract class BasesViewBase extends Component {
 
 		this.taskUpdateListener = this.plugin.emitter.on(EVENT_TASK_UPDATED, async (eventData: any) => {
 			try {
+				// AGGRESSIVE early exits to prevent unnecessary processing
+				// Check 1: Container disconnected
+				if (!this.containerEl?.isConnected) return;
+				
+				// Check 2: Root element disconnected
+				if (!this.rootElement?.isConnected) return;
+				
+				// Check 3: View not visible (saves CPU for background tabs)
+				// Only check if method exists (EisenhowerMatrixView has it)
+				if ((this as any).isViewVisible && !(this as any).isViewVisible()) return;
+				
 				const updatedTask = eventData?.task || eventData?.taskInfo;
 				if (!updatedTask?.path) return;
 
-				// Skip if view is not visible (no point updating hidden views)
-				if (!this.rootElement?.isConnected) return;
-
-				// Use cached Set for O(1) lookup instead of O(n) iteration
+				// Check 4: Task not relevant to this view (O(1) lookup)
 				const isRelevant = this.relevantPathsCache.has(updatedTask.path);
+				if (!isRelevant) return;
 
-				if (isRelevant) {
-					await this.handleTaskUpdate(updatedTask);
-				}
+				// All checks passed - process the update
+				await this.handleTaskUpdate(updatedTask);
 			} catch (error) {
 				console.error("[TaskNotes][Bases] Error in task update handler:", error);
-				this.debouncedRefresh();
+				// Only debounce refresh if view is still visible
+				if (this.rootElement?.isConnected && (!(this as any).isViewVisible || (this as any).isViewVisible())) {
+					this.debouncedRefresh();
+				}
 			}
 		});
 

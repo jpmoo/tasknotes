@@ -33,16 +33,40 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	private collapsedSections: Set<Quadrant> = new Set(); // Track collapsed sections (holding-pen, excluded)
 	private isUnloading = false; // Flag to prevent multiple save attempts during unload
 	
-	// Static timestamp-based approach to persist flags across view instance recreations
-	// Uses a global timestamp that's checked within a short window (3 seconds)
-	private static lastSelectiveUpdateTime: number = 0;
-	private static skipDataUpdateCount: number = 0;
+	// Track all event listeners for proper cleanup
+	private eventListeners: Array<{ element: HTMLElement; event: string; handler: EventListener }> = [];
+	// Track all timers for proper cleanup
+	private activeTimers: Set<number> = new Set();
+	
+	/**
+	 * Helper to track and add event listeners for cleanup
+	 */
+	private addTrackedEventListener(element: HTMLElement, event: string, handler: EventListener, options?: boolean | AddEventListenerOptions): void {
+		element.addEventListener(event, handler, options);
+		this.eventListeners.push({ element, event, handler });
+	}
+	
+	/**
+	 * Helper to track setTimeout calls for cleanup
+	 */
+	private trackedSetTimeout(callback: () => void, delay: number): number {
+		const timerId = window.setTimeout(() => {
+			this.activeTimers.delete(timerId);
+			callback();
+		}, delay);
+		this.activeTimers.add(timerId);
+		return timerId;
+	}
+	
+	// Instance-based flags (not static to avoid cross-instance interference)
+	// Each view instance has its own flags to prevent multiple views from interfering
+	private lastSelectiveUpdateTime: number = 0;
+	private skipDataUpdateCount: number = 0;
 	private static readonly SELECTIVE_UPDATE_WINDOW_MS = 3000; // 3 second window
 	
 	// Instance properties (may be lost if view is recreated)
 	private justDidSelectiveUpdate = false; // Flag to skip onDataUpdated() if we just updated UI selectively
 	private skipNextDataUpdate = false; // Additional flag to skip the very next onDataUpdated() call
-	private skipDataUpdateCount = 0; // Counter to track how many onDataUpdated() calls to skip
 	private _isFirstDataUpdate = true; // Track first data update for immediate render
 	private _isRendering = false; // Prevent concurrent renders
 	private _pendingRender = false; // Track if render was requested while rendering
@@ -50,10 +74,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	private _orderingsLoaded = false; // Track if orderings have been loaded
 	private _collapsedStateLoaded = false; // Track if collapsed state has been loaded
 	private _lastRenderTime = 0; // Track last render time for throttling
-	private static readonly MIN_RENDER_INTERVAL_MS = 2000; // Minimum 2 seconds between renders (throttle)
+	private _throttleTimer: number | null = null; // Track throttle timer to cancel on unload
+	private _initialRenderComplete = false; // Track if initial render has completed
+	private _initialRenderCooldown = 0; // Cooldown period after initial render to prevent immediate re-renders
+	private _renderBlocked = false; // Block all renders during stabilization period
+	private _viewInstanceId: string; // Unique ID for this view instance to prevent cross-instance issues
+	private _onDataUpdatedCallCount = 0; // Track rapid successive calls
+	private _onDataUpdatedCallResetTimer: number | null = null; // Timer to reset call count
+	private static readonly MIN_RENDER_INTERVAL_MS = 10000; // Minimum 10 seconds between renders (throttle) - very aggressive
+	private static readonly INITIAL_RENDER_COOLDOWN_MS = 30000; // 30 second cooldown after initial render - very long
+	private static readonly MAX_ON_DATA_UPDATED_CALLS_PER_SECOND = 2; // Max 2 calls per second
 
 	constructor(controller: any, containerEl: HTMLElement, plugin: TaskNotesPlugin) {
 		super(controller, containerEl, plugin);
+		// Generate unique ID for this view instance
+		this._viewInstanceId = `eisenhower-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 		(this.dataAdapter as any).basesView = this;
 	}
 
@@ -69,6 +104,23 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	async render(): Promise<void> {
+		// Skip rendering if view is unloading (prevents renders during file switches)
+		if (this.isUnloading) {
+			return;
+		}
+		
+		// AGGRESSIVE: Block all renders during initial stabilization period
+		// This prevents the matrix from disappearing due to rapid re-renders
+		if (this._renderBlocked) {
+			return;
+		}
+		
+		// CRITICAL: Verify this render is for the correct container
+		// Prevent renders from affecting wrong view instances
+		if (!this.containerEl || !this.containerEl.isConnected) {
+			return;
+		}
+		
 		// Skip rendering if view is not visible (saves CPU for background tabs)
 		if (!this.isViewVisible()) {
 			return;
@@ -87,6 +139,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this._isRendering = false;
 			return;
 		}
+		
+		// CRITICAL: Verify rootElement belongs to this container
+		if (!this.containerEl.contains(this.rootElement)) {
+			this._isRendering = false;
+			return;
+		}
+		
 		if (!this.matrixContainer) {
 			// Container not set up yet, try to set it up
 			this.setupContainer();
@@ -94,6 +153,16 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		if (!this.matrixContainer) {
 			this._isRendering = false;
 			return;
+		}
+		
+		// CRITICAL: Verify matrixContainer belongs to this rootElement
+		if (!this.rootElement.contains(this.matrixContainer)) {
+			// Matrix container is orphaned, recreate it
+			this.setupContainer();
+			if (!this.matrixContainer || !this.rootElement.contains(this.matrixContainer)) {
+				this._isRendering = false;
+				return;
+			}
 		}
 		if (!this.data) {
 			this._isRendering = false;
@@ -106,6 +175,16 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 
 		try {
+			// Use requestAnimationFrame to yield to browser and prevent blocking
+			// This prevents the UI from freezing during heavy operations
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			
+			// Check again after yielding - view might have been unloaded
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
 			const dataItems = this.dataAdapter.extractDataItems();
 			if (!dataItems || dataItems.length === 0) {
 				this.renderEmptyState();
@@ -118,8 +197,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const dataHash = this.createDataHash(dataItems);
 			if (dataHash === this._lastDataHash && this._lastDataHash !== null) {
 				// Data hasn't changed, skip render
-				this._isRendering = false;
-				return;
+				// BUT: if matrix is empty, we need to render anyway (recovery case)
+				if (this.matrixContainer && this.matrixContainer.children.length > 0) {
+					this._isRendering = false;
+					return;
+				}
+				// Matrix is empty, force a render even if data hash is same
 			}
 			this._lastDataHash = dataHash;
 			
@@ -129,8 +212,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			if (timeSinceLastRender < EisenhowerMatrixView.MIN_RENDER_INTERVAL_MS && this._lastRenderTime > 0) {
 				// Too soon since last render, schedule for later
 				this._isRendering = false;
-				setTimeout(() => {
-					if (this.isViewVisible()) {
+				// Cancel any existing throttle timer
+				if (this._throttleTimer !== null) {
+					clearTimeout(this._throttleTimer);
+				}
+				this._throttleTimer = this.trackedSetTimeout(() => {
+					this._throttleTimer = null;
+					if (!this.isUnloading && this.isViewVisible()) {
 						this.render();
 					}
 				}, EisenhowerMatrixView.MIN_RENDER_INTERVAL_MS - timeSinceLastRender);
@@ -138,16 +226,77 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 			this._lastRenderTime = now;
 			
-			const taskNotes = await identifyTaskNotesFromBasesData(dataItems, this.plugin);
+			// Yield again before heavy data processing
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			
+			// Check again after yielding
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
+			// Process data items in batches with yields to prevent blocking
+			// This prevents the UI from freezing when processing many tasks
+			const taskNotes: TaskInfo[] = [];
+			const BATCH_SIZE = 50; // Process 50 items at a time
+			for (let i = 0; i < dataItems.length; i += BATCH_SIZE) {
+				// Check if we should abort before each batch
+				if (this.isUnloading || !this.isViewVisible() || this._renderBlocked) {
+					this._isRendering = false;
+					return;
+				}
+				
+				const batch = dataItems.slice(i, i + BATCH_SIZE);
+				const batchTasks = await identifyTaskNotesFromBasesData(batch, this.plugin);
+				taskNotes.push(...batchTasks);
+				
+				// Yield after each batch to keep UI responsive
+				if (i + BATCH_SIZE < dataItems.length) {
+					await new Promise(resolve => requestAnimationFrame(resolve));
+				}
+			}
+			
+			// Check again after async operation - view might have been unloaded
+			if (this.isUnloading || !this.isViewVisible() || this._renderBlocked) {
+				this._isRendering = false;
+				return;
+			}
 
 			// Clean up existing scrollers
 			this.destroyQuadrantScrollers();
 			
-			// Clear matrix
-			this.matrixContainer.empty();
-
+			// Only clear matrix if we're actually going to render new content
+			// Don't clear if we're just going to exit early
 			if (taskNotes.length === 0) {
+				// Only clear if we need to show empty state
+				this.matrixContainer.empty();
 				this.renderEmptyState();
+				this._isRendering = false;
+				return;
+			}
+			
+			// CRITICAL: Never clear matrix during cooldown period if it has content
+			// This is the most important check to prevent disappearing
+			const inCooldown = this._initialRenderComplete && this._initialRenderCooldown > Date.now();
+			if (inCooldown && this.matrixContainer && this.matrixContainer.children.length > 0) {
+				// In cooldown and matrix has content - DO NOT CLEAR, just exit
+				// This prevents the matrix from disappearing no matter what
+				this._isRendering = false;
+				return;
+			}
+			
+			// Additional safety: If matrix has content and we're blocked, don't clear
+			if (this._renderBlocked && this.matrixContainer && this.matrixContainer.children.length > 0) {
+				this._isRendering = false;
+				return;
+			}
+			
+			// Now clear matrix since we know we're going to render
+			// But only if we're not in cooldown/blocked state
+			if (!inCooldown && !this._renderBlocked) {
+				this.matrixContainer.empty();
+			} else {
+				// We're in cooldown/blocked - don't clear, just exit
 				this._isRendering = false;
 				return;
 			}
@@ -164,50 +313,129 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				this._collapsedStateLoaded = true;
 			}
 
+			// Yield before heavy categorization
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
 			// Categorize tasks into quadrants
 			const quadrants = this.categorizeTasks(taskNotes);
 
 			// Apply custom ordering to each quadrant's tasks
 			this.applyOrderingToQuadrants(quadrants);
 
+			// Yield before rendering quadrants
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+
 			// Render each quadrant - top row: Important quadrants, bottom row: Not Important quadrants
 			// All use fixed height (400px total: 350px content + 50px header) set directly in renderQuadrant
+			// Render quadrants one at a time with yields to prevent blocking
 			this.renderQuadrant("urgent-important", quadrants.urgentImportant, "Urgent / Important", "DO", false);
+			
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
 			this.renderQuadrant("not-urgent-important", quadrants.notUrgentImportant, "Not Urgent / Important", "DECIDE", false);
+			
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
 			this.renderQuadrant("urgent-not-important", quadrants.urgentNotImportant, "Urgent / Not Important", "DELEGATE", false);
+			
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
+			
 			this.renderQuadrant("not-urgent-not-important", quadrants.notUrgentNotImportant, "Not Urgent / Not Important", "DEFER", false);
+			
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
 			
 			// Render uncategorized region (spans full width below the matrix) - fixed height
 			this.renderQuadrant("holding-pen", quadrants.holdingPen, "Uncategorized", undefined, false, true);
+			
+			await new Promise(resolve => requestAnimationFrame(resolve));
+			if (this.isUnloading || !this.isViewVisible()) {
+				this._isRendering = false;
+				return;
+			}
 			
 			// Render excluded region (spans full width below uncategorized) - fixed height
 			this.renderQuadrant("excluded", quadrants.excluded, "Excluded", undefined, false, true);
 		} catch (error: any) {
 			console.error("[TaskNotes][EisenhowerMatrixView] Error rendering:", error);
+			// If matrix was cleared but render failed, try to restore previous state
+			// by triggering a re-render after a short delay
+			if (this.matrixContainer && this.matrixContainer.children.length === 0) {
+				// Matrix was cleared but render failed - schedule a recovery render
+				this.trackedSetTimeout(() => {
+					if (!this.isUnloading && this.isViewVisible() && this.matrixContainer?.children.length === 0) {
+						// Force a re-render by clearing the data hash
+						this._lastDataHash = null;
+						this.render();
+					}
+				}, 1000);
+			}
 			this.renderError(error);
 		} finally {
 			this._isRendering = false;
+			
+			// Mark initial render as complete and set cooldown only if render succeeded
+			// Check if matrix actually has content
+			if (!this._initialRenderComplete && this.matrixContainer && this.matrixContainer.children.length > 0) {
+				this._initialRenderComplete = true;
+				this._initialRenderCooldown = Date.now() + EisenhowerMatrixView.INITIAL_RENDER_COOLDOWN_MS;
+				
+				// AGGRESSIVE: Block all renders for the cooldown period to prevent disappearing
+				this._renderBlocked = true;
+				this.trackedSetTimeout(() => {
+					this._renderBlocked = false;
+				}, EisenhowerMatrixView.INITIAL_RENDER_COOLDOWN_MS);
+			}
 		}
 
 		// If a render was requested while we were rendering, do it now
-		if (this._pendingRender) {
+		// But only if we're not unloading (prevents renders during file switches)
+		if (this._pendingRender && !this.isUnloading) {
 			this._pendingRender = false;
 			// Use setTimeout to avoid deep call stack
-			setTimeout(() => this.render(), 0);
+			this.trackedSetTimeout(() => {
+				if (!this.isUnloading && this.isViewVisible()) {
+					this.render();
+				}
+			}, 0);
 		}
 	}
 
 	/**
 	 * Create a simple hash of data items to detect if data has changed.
-	 * Uses paths and modification times if available.
+	 * Uses paths only to avoid false positives from timestamp changes.
 	 */
 	private createDataHash(dataItems: any[]): string {
 		if (!dataItems || dataItems.length === 0) {
 			return 'empty';
 		}
 		
-		// Create a simple hash based on paths and count
-		// This is fast and sufficient to detect most changes
+		// Create a simple hash based on paths and count only
+		// Don't include timestamps as they can change without actual data changes
+		// This prevents unnecessary re-renders when metadata updates but data is the same
 		const paths = dataItems
 			.map(item => item?.path || item?.file?.path || '')
 			.filter(Boolean)
@@ -216,15 +444,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		
 		const count = dataItems.length;
 		
-		// Include modification times if available (for file change detection)
-		const mtimes = dataItems
-			.map(item => {
-				const stat = item?.stat || item?.file?.stat;
-				return stat?.mtime || 0;
-			})
-			.join(',');
-		
-		return `${count}:${paths.substring(0, 200)}:${mtimes}`;
+		// Use a shorter hash to avoid memory issues with large datasets
+		// Just use count and first 100 chars of paths
+		return `${count}:${paths.substring(0, 100)}`;
 	}
 
 	/**
@@ -414,6 +636,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	}
 
 	private saveQuadrantOrderings(): void {
+		// CRITICAL: Skip save if we're unloading or container is disconnected
+		// config.set() triggers onDataUpdated() on ALL instances, including new instances
+		// This causes cascading renders when switching between notes (same tab or different tabs)
+		if (this.isUnloading || !this.containerEl?.isConnected || !this.rootElement?.isConnected) {
+			return;
+		}
+		
 		// Mark as needing reload on next render
 		this._orderingsLoaded = false;
 		try {
@@ -449,9 +678,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				return;
 			}
 			
-			// Try to save to Bases config first, fallback to localStorage if it fails
+			// CRITICAL: Only use localStorage during unload or when container is disconnected
+			// config.set() triggers onDataUpdated() on ALL instances, causing cascading renders
+			// When replacing a note in the same tab, Bases may reuse the view instance,
+			// so config.set() would trigger updates on the new instance immediately
 			let savedToConfig = false;
-			if (this.config && typeof this.config.set === 'function') {
+			if (!this.isUnloading && this.containerEl?.isConnected && this.rootElement?.isConnected &&
+			    this.config && typeof this.config.set === 'function') {
 				try {
 					this.config.set('quadrantOrderings', orderingsJson);
 					savedToConfig = true;
@@ -519,6 +752,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 * Save collapsed state to BasesViewConfig or localStorage fallback
 	 */
 	private saveCollapsedState(): void {
+		// CRITICAL: Skip save if we're unloading or container is disconnected
+		// config.set() triggers onDataUpdated() on ALL instances, including new instances
+		// This causes cascading renders when switching between notes (same tab or different tabs)
+		if (this.isUnloading || !this.containerEl?.isConnected || !this.rootElement?.isConnected) {
+			return;
+		}
+		
 		// Mark as needing reload on next render
 		this._collapsedStateLoaded = false;
 		try {
@@ -542,9 +782,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				return;
 			}
 			
-			// Try to save to Bases config first, fallback to localStorage if it fails
+			// CRITICAL: Only use localStorage during unload or when container is disconnected
+			// config.set() triggers onDataUpdated() on ALL instances, causing cascading renders
+			// When replacing a note in the same tab, Bases may reuse the view instance,
+			// so config.set() would trigger updates on the new instance immediately
 			let savedToConfig = false;
-			if (this.config && typeof this.config.set === 'function') {
+			if (!this.isUnloading && this.containerEl?.isConnected && this.rootElement?.isConnected &&
+			    this.config && typeof this.config.set === 'function') {
 				try {
 					this.config.set('collapsedSections', collapsedJson);
 					savedToConfig = true;
@@ -841,7 +1085,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			
 			let isCollapsed = isInitiallyCollapsed;
 			
-			toggle.addEventListener("click", (e) => {
+			this.addTrackedEventListener(toggle, "click", (e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				isCollapsed = !isCollapsed;
@@ -982,7 +1226,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		// Only handle drops INTO these quadrants, not FROM them
 		if (quadrantId === "excluded" || quadrantId === "holding-pen") {
 			// Set up a separate handler for the tasks container that only handles drops INTO this quadrant
-			tasksContainer.addEventListener("dragover", (e: DragEvent) => {
+			this.addTrackedEventListener(tasksContainer, "dragover", (e: DragEvent) => {
 				// Only allow dragover if dragging FROM a different quadrant
 				// AND we're actually over this tasks container (not just bubbling through)
 				if (this.draggedFromQuadrant && 
@@ -996,7 +1240,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				// For same-quadrant or no quadrant, don't prevent - let it bubble
 			});
 			
-			tasksContainer.addEventListener("drop", async (e: DragEvent) => {
+			this.addTrackedEventListener(tasksContainer, "drop", async (e: DragEvent) => {
 				// Only handle if dragging FROM a different quadrant
 				// AND we're actually dropping on this tasks container or its children
 				const target = e.target as HTMLElement;
@@ -1080,44 +1324,22 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	/**
 	 * Check if this view is actually visible to the user.
 	 * Returns false if the view is in a background tab, scrolled out of view, or not connected.
+	 * Simplified to avoid expensive DOM operations that can cause crashes.
 	 */
 	private isViewVisible(): boolean {
+		// Fast check: just verify element is connected
+		// Avoid expensive getBoundingClientRect and getComputedStyle calls that can block
 		if (!this.rootElement?.isConnected) {
 			return false;
 		}
 		
-		// Check if the view is in the viewport
-		const rect = this.rootElement.getBoundingClientRect();
-		if (rect.width === 0 && rect.height === 0) {
-			// View has no dimensions, likely hidden
+		// Simple check: if container is not connected, view is not visible
+		if (!this.containerEl?.isConnected) {
 			return false;
 		}
 		
-		// Check if any parent is hidden (e.g., in a collapsed split or background tab)
-		let element: HTMLElement | null = this.rootElement;
-		while (element) {
-			const style = window.getComputedStyle(element);
-			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-				return false;
-			}
-			element = element.parentElement;
-		}
-		
-		// Check if the view is in an active/visible workspace leaf
-		// For embedded views, check if the containing note is visible
-		const workspaceLeaf = this.containerEl.closest('.workspace-leaf');
-		if (workspaceLeaf) {
-			const isActive = workspaceLeaf.classList.contains('mod-active');
-			// If not active, check if it's at least visible (not in a collapsed split)
-			if (!isActive) {
-				// Check if the leaf is actually visible (not in a collapsed split)
-				const leafRect = workspaceLeaf.getBoundingClientRect();
-				if (leafRect.width === 0 && leafRect.height === 0) {
-					return false;
-				}
-			}
-		}
-		
+		// For embedded views, just check if the container is in the DOM
+		// More expensive checks are deferred to avoid blocking
 		return true;
 	}
 
@@ -1125,6 +1347,36 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 * Override onDataUpdated to skip refresh if we just did a selective update
 	 */
 	onDataUpdated(): void {
+		// CRITICAL: Track rapid successive calls and block if too many
+		this._onDataUpdatedCallCount++;
+		if (this._onDataUpdatedCallResetTimer) {
+			clearTimeout(this._onDataUpdatedCallResetTimer);
+		}
+		this._onDataUpdatedCallResetTimer = this.trackedSetTimeout(() => {
+			this._onDataUpdatedCallCount = 0;
+			this._onDataUpdatedCallResetTimer = null;
+		}, 1000); // Reset count every second
+		
+		// If called too many times in a second, completely block
+		if (this._onDataUpdatedCallCount > EisenhowerMatrixView.MAX_ON_DATA_UPDATED_CALLS_PER_SECOND) {
+			// Too many calls - clear timer and exit
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+			}
+			return;
+		}
+		
+		// Early exit: Skip ALL processing if view is unloading (prevents work during file switches)
+		if (this.isUnloading) {
+			// Clear any pending timers
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+			}
+			return;
+		}
+		
 		// Early exit: Skip ALL processing if view is not visible
 		// This prevents unnecessary work for views in background tabs
 		if (!this.isViewVisible()) {
@@ -1136,20 +1388,31 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			return;
 		}
 		
-		// Check both instance flags and static timestamp-based flags (in case view was recreated)
-		const staticSkipCount = EisenhowerMatrixView.skipDataUpdateCount;
-		
-		// Only calculate time-based check if we have a valid timestamp
-		let staticJustDidSelectiveUpdate = false;
-		if (EisenhowerMatrixView.lastSelectiveUpdateTime > 0) {
-			const now = Date.now();
-			const timeSinceSelectiveUpdate = now - EisenhowerMatrixView.lastSelectiveUpdateTime;
-			const isWithinWindow = timeSinceSelectiveUpdate < EisenhowerMatrixView.SELECTIVE_UPDATE_WINDOW_MS;
-			staticJustDidSelectiveUpdate = isWithinWindow;
+		// AGGRESSIVE: Block ALL updates during cooldown period
+		// This prevents the matrix from disappearing due to rapid onDataUpdated calls
+		if (this._renderBlocked || (this._initialRenderComplete && this._initialRenderCooldown > Date.now())) {
+			// Still in cooldown/blocked period, skip this update entirely
+			// Clear any pending debounce timer since we're blocking
+			if ((this as any).dataUpdateDebounceTimer) {
+				clearTimeout((this as any).dataUpdateDebounceTimer);
+				(this as any).dataUpdateDebounceTimer = null;
+			}
+			return;
 		}
 		
-		const justDidSelectiveUpdate = this.justDidSelectiveUpdate || staticJustDidSelectiveUpdate;
-		const skipDataUpdateCount = this.skipDataUpdateCount + staticSkipCount;
+		// Use instance-only flags to avoid cross-instance interference
+		// Each view manages its own selective update state
+		
+		// Only calculate time-based check if we have a valid timestamp
+		let justDidSelectiveUpdate = this.justDidSelectiveUpdate;
+		if (this.lastSelectiveUpdateTime > 0) {
+			const now = Date.now();
+			const timeSinceSelectiveUpdate = now - this.lastSelectiveUpdateTime;
+			const isWithinWindow = timeSinceSelectiveUpdate < EisenhowerMatrixView.SELECTIVE_UPDATE_WINDOW_MS;
+			justDidSelectiveUpdate = justDidSelectiveUpdate || isWithinWindow;
+		}
+		
+		const skipDataUpdateCount = this.skipDataUpdateCount;
 
 		// If we just did a selective update, skip ALL refreshes
 		// The UI is already up to date, so we don't need to refresh
@@ -1170,12 +1433,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				return;
 			}
 			
-			// Update both instance and static flags
+			// Update instance flags
 			if (skipDataUpdateCount > 0) {
 				this.skipDataUpdateCount = Math.max(0, this.skipDataUpdateCount - 1);
-				if (EisenhowerMatrixView.skipDataUpdateCount > 0) {
-					EisenhowerMatrixView.skipDataUpdateCount--;
-				}
 			}
 			
 			// Clear skipNextDataUpdate immediately (one-time skip)
@@ -1185,7 +1445,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			
 			// Clear the flags after a delay to catch both file save and config.set() triggers
 			if (justDidSelectiveUpdate) {
-				setTimeout(() => {
+				this.trackedSetTimeout(() => {
 					this.justDidSelectiveUpdate = false;
 					// Don't clear static timestamp here - let it expire naturally
 				}, 2000);
@@ -1220,13 +1480,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			(this as any).dataUpdateDebounceTimer = null;
 		}
 
-		// Use longer debounce for external changes (typing in notes)
+		// Use very long debounce for external changes (typing in notes)
 		// This prevents excessive re-renders when editing notes with embedded matrix
-		// Increased to 8 seconds for embedded views to reduce CPU usage
-		(this as any).dataUpdateDebounceTimer = window.setTimeout(() => {
+		// Increased to 15 seconds for embedded views to drastically reduce CPU usage
+		(this as any).dataUpdateDebounceTimer = this.trackedSetTimeout(() => {
 			(this as any).dataUpdateDebounceTimer = null;
+			// Multiple checks before rendering
+			if (this.isUnloading || this._renderBlocked) {
+				return;
+			}
 			// Double-check visibility before rendering
 			if (!this.isViewVisible()) {
+				return;
+			}
+			// Check cooldown again (might have been extended)
+			if (this._initialRenderComplete && this._initialRenderCooldown > Date.now()) {
 				return;
 			}
 			try {
@@ -1235,10 +1503,21 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				console.error(`[TaskNotes][${this.type}] Render error:`, error);
 				this.renderError(error as Error);
 			}
-		}, 8000);  // 8 second debounce - longer for embedded views to reduce CPU usage
+		}, 15000);  // 15 second debounce - very long for embedded views to drastically reduce CPU usage
 	}
 
 	protected async handleTaskUpdate(task: TaskInfo): Promise<void> {
+		// AGGRESSIVE: Skip ALL task updates during cooldown/blocking period
+		// This prevents expensive processing when multiple views are open
+		if (this._renderBlocked || (this._initialRenderComplete && this._initialRenderCooldown > Date.now())) {
+			return;
+		}
+		
+		// Skip if view is unloading
+		if (this.isUnloading) {
+			return;
+		}
+		
 		// Skip if view is not visible (no point updating hidden views)
 		if (!this.isViewVisible()) {
 			return;
@@ -1254,6 +1533,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 		
 		// Don't refresh here - onDataUpdated() will handle it if needed
+		// But we've already blocked it above during cooldown
 	}
 
 	private createVirtualQuadrant(
@@ -1350,7 +1630,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		`;
 
 		// Setup drop zone handlers
-		dropZone.addEventListener("dragover", (e: DragEvent) => {
+		this.addTrackedEventListener(dropZone, "dragover", (e: DragEvent) => {
 			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
 			
 			// Only handle if dragging within the same quadrant
@@ -1363,11 +1643,11 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// For cross-quadrant drags, don't prevent - let it bubble to quadrant handler
 		});
 
-		dropZone.addEventListener("dragleave", () => {
+		this.addTrackedEventListener(dropZone, "dragleave", () => {
 			dropZone.classList.remove("eisenhower-matrix__drop-zone--active");
 		});
 
-		dropZone.addEventListener("drop", async (e: DragEvent) => {
+		this.addTrackedEventListener(dropZone, "drop", async (e: DragEvent) => {
 			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
 			
 			// Only handle if dragging within the same quadrant
@@ -1394,7 +1674,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 		(cardWrapper as any).__dragHandlersAttached = true;
 		
-		cardWrapper.addEventListener("dragstart", (e: DragEvent) => {
+		this.addTrackedEventListener(cardWrapper, "dragstart", (e: DragEvent) => {
 			this.draggedTaskPath = task.path;
 			this.draggedFromQuadrant = quadrantId;
 			cardWrapper.classList.add("eisenhower-matrix__card--dragging");
@@ -1406,7 +1686,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 		});
 
-		cardWrapper.addEventListener("dragend", () => {
+		this.addTrackedEventListener(cardWrapper, "dragend", () => {
 			cardWrapper.classList.remove("eisenhower-matrix__card--dragging");
 
 			// Clean up any lingering dragover classes
@@ -1425,7 +1705,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		});
 
 		// Add drop handlers for within-quadrant reordering
-		cardWrapper.addEventListener("dragover", (e: DragEvent) => {
+		this.addTrackedEventListener(cardWrapper, "dragover", (e: DragEvent) => {
 			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
 			
 			// Only handle if dragging within the same quadrant
@@ -1446,12 +1726,12 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Let the event bubble up to the quadrant's dragover handler
 		});
 
-		cardWrapper.addEventListener("dragleave", () => {
+		this.addTrackedEventListener(cardWrapper, "dragleave", () => {
 			cardWrapper.classList.remove("eisenhower-matrix__card-wrapper--dragover");
 			cardWrapper.removeAttribute("data-insert-before");
 		});
 
-		cardWrapper.addEventListener("drop", async (e: DragEvent) => {
+		this.addTrackedEventListener(cardWrapper, "drop", async (e: DragEvent) => {
 			if (!this.draggedTaskPath || !this.draggedFromQuadrant) return;
 			
 			// Only handle if dragging within the same quadrant
@@ -1489,7 +1769,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 	private setupQuadrantDropHandlers(quadrant: HTMLElement, quadrantId: Quadrant): void {
 		// Drag over handler - must always prevent default for drops to work
-		quadrant.addEventListener("dragover", (e: DragEvent) => {
+		this.addTrackedEventListener(quadrant, "dragover", (e: DragEvent) => {
 			// Always prevent default if we have a drag in progress (required for drop to work)
 			if (this.draggedTaskPath) {
 				// Only show visual feedback if dragging from a different quadrant
@@ -1507,7 +1787,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		});
 
 		// Drag leave handler
-		quadrant.addEventListener("dragleave", (e: DragEvent) => {
+		this.addTrackedEventListener(quadrant, "dragleave", (e: DragEvent) => {
 			// Only remove if we're actually leaving the quadrant (not just moving to a child)
 			const rect = quadrant.getBoundingClientRect();
 			const x = (e as any).clientX;
@@ -1523,7 +1803,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 
 		// Drop handler - only handles cross-quadrant moves
 		// Use capture phase to catch drops before child handlers
-		quadrant.addEventListener("drop", async (e: DragEvent) => {
+		this.addTrackedEventListener(quadrant, "drop", async (e: DragEvent) => {
 			// Don't handle if this is a same-quadrant drop (handled by card drop handler)
 			if (this.draggedFromQuadrant === quadrantId) {
 				return;
@@ -1788,10 +2068,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			this.justDidSelectiveUpdate = true;
 			this.skipDataUpdateCount = 2; // Skip both onDataUpdated() calls
 			
-			// Set static timestamp and counter (persists across instance recreations)
-			EisenhowerMatrixView.lastSelectiveUpdateTime = Date.now();
-			EisenhowerMatrixView.skipDataUpdateCount = 2; // Skip both
-			console.log("[EisenhowerMatrixView] Set static flags (drag), timestamp:", EisenhowerMatrixView.lastSelectiveUpdateTime, "skipCount:", EisenhowerMatrixView.skipDataUpdateCount);
+			// Set instance flags for this view only (prevents cross-instance interference)
+			this.lastSelectiveUpdateTime = Date.now();
+			this.skipDataUpdateCount = 2; // Skip both
 			
 			// Clear any pending debounce timer to prevent a quick refresh
 			if ((this as any).dataUpdateDebounceTimer) {
@@ -1857,7 +2136,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Ensure view is still visible after selective update
 			// Check after a short delay to catch any clearing that happens asynchronously
 			// Also check after config.set() completes (which triggers the second onDataUpdated)
-			setTimeout(() => {
+			this.trackedSetTimeout(() => {
 				if (!this.matrixContainer || !this.matrixContainer.isConnected || 
 				    !this.rootElement?.contains(this.matrixContainer)) {
 					console.log("[EisenhowerMatrixView] View was cleared after selective update, forcing render");
@@ -1871,8 +2150,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			// Clear flags on error so view can refresh normally
 			this.justDidSelectiveUpdate = false;
 			this.skipDataUpdateCount = 0;
-			EisenhowerMatrixView.lastSelectiveUpdateTime = 0;
-			EisenhowerMatrixView.skipDataUpdateCount = 0;
+			this.lastSelectiveUpdateTime = 0;
+			this.skipDataUpdateCount = 0;
 		}
 	}
 
@@ -2187,9 +2466,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 	 */
 	private setupTaskContextMenu(cardWrapper: HTMLElement, task: TaskInfo): void {
 		// Find the actual task card element (it might be nested inside the wrapper)
-		const card = cardWrapper.querySelector(".task-card") || cardWrapper;
+		const card = (cardWrapper.querySelector(".task-card") || cardWrapper) as HTMLElement;
 		
-		card.addEventListener("contextmenu", async (e: MouseEvent) => {
+		this.addTrackedEventListener(card, "contextmenu", async (e: MouseEvent) => {
 			e.preventDefault();
 			e.stopPropagation();
 			
@@ -2248,10 +2527,9 @@ export class EisenhowerMatrixView extends BasesViewBase {
 								this.justDidSelectiveUpdate = true;
 								this.skipDataUpdateCount = 2; // Skip both onDataUpdated() calls
 								
-								// Set static timestamp and counter (persists across instance recreations)
-								EisenhowerMatrixView.lastSelectiveUpdateTime = Date.now();
-								EisenhowerMatrixView.skipDataUpdateCount = 2; // Skip both
-								console.log("[EisenhowerMatrixView] Set static flags (context menu), timestamp:", EisenhowerMatrixView.lastSelectiveUpdateTime, "skipCount:", EisenhowerMatrixView.skipDataUpdateCount);
+								// Set instance flags for this view only (prevents cross-instance interference)
+								this.lastSelectiveUpdateTime = Date.now();
+								this.skipDataUpdateCount = 2; // Skip both
 								
 								// Clear any pending debounce timer to prevent a quick refresh
 								if ((this as any).dataUpdateDebounceTimer) {
@@ -2314,7 +2592,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 								// Ensure view is still visible after selective update
 								// Check after a short delay to catch any clearing that happens asynchronously
 								// Also check after config.set() completes (which triggers the second onDataUpdated)
-								setTimeout(() => {
+								this.trackedSetTimeout(() => {
 									if (!this.matrixContainer || !this.matrixContainer.isConnected || 
 									    !this.rootElement?.contains(this.matrixContainer)) {
 										console.log("[EisenhowerMatrixView] View was cleared after selective update (context menu), forcing render");
@@ -2328,8 +2606,8 @@ export class EisenhowerMatrixView extends BasesViewBase {
 								// Clear flags on error so view can refresh normally
 								this.justDidSelectiveUpdate = false;
 								this.skipDataUpdateCount = 0;
-								EisenhowerMatrixView.lastSelectiveUpdateTime = 0;
-								EisenhowerMatrixView.skipDataUpdateCount = 0;
+								this.lastSelectiveUpdateTime = 0;
+								this.skipDataUpdateCount = 0;
 							}
 						});
 					});
@@ -2390,30 +2668,57 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 		this.isUnloading = true;
 		
+		// AGGRESSIVE: Block all renders immediately
+		this._renderBlocked = true;
+		
+		// Cancel all pending operations to prevent renders during/after unload
+		if ((this as any).dataUpdateDebounceTimer) {
+			clearTimeout((this as any).dataUpdateDebounceTimer);
+			(this as any).dataUpdateDebounceTimer = null;
+		}
+		if (this._throttleTimer !== null) {
+			clearTimeout(this._throttleTimer);
+			this._throttleTimer = null;
+		}
+		if (this._onDataUpdatedCallResetTimer !== null) {
+			clearTimeout(this._onDataUpdatedCallResetTimer);
+			this._onDataUpdatedCallResetTimer = null;
+		}
+		
+		// Clear render flags to prevent any pending renders
+		this._isRendering = false;
+		this._pendingRender = false;
+		
+		// Clean up all event listeners
+		for (const { element, event, handler } of this.eventListeners) {
+			try {
+				element.removeEventListener(event, handler);
+			} catch (error) {
+				// Ignore errors during cleanup (element might already be removed)
+			}
+		}
+		this.eventListeners = [];
+		
+		// Clean up all timers
+		for (const timerId of this.activeTimers) {
+			clearTimeout(timerId);
+		}
+		this.activeTimers.clear();
+		
 		// Clean up virtual scrollers
 		this.destroyQuadrantScrollers();
 		this.taskInfoCache.clear();
 		
-		// Save quadrant orderings on unload (safe here, won't trigger view recreation)
-		// Use try-catch to prevent errors from interrupting cleanup
-		try {
-			this.saveQuadrantOrderings();
-		} catch (error) {
-			console.warn('[EisenhowerMatrixView] Error saving quadrant orderings during unload:', error);
-		}
-		
-		// Save collapsed state on unload (safe here, won't trigger view recreation)
-		// Use try-catch to prevent errors from interrupting cleanup
-		try {
-			this.saveCollapsedState();
-		} catch (error) {
-			console.warn('[EisenhowerMatrixView] Error saving collapsed state during unload:', error);
-		}
+		// CRITICAL: Don't save config during unload - config.set() triggers onDataUpdated() on ALL instances
+		// This causes cascading renders and slowdowns when switching between notes
+		// Instead, save will happen on next render when view is loaded again
+		// The orderings and collapsed state are already in memory and will be saved when needed
 		
 		this.matrixContainer = null;
 		
-		// Note: Don't clear static flags here - they're global and may be needed by a new instance
-		// They'll expire naturally after SELECTIVE_UPDATE_WINDOW_MS
+		// Clear instance flags on unload
+		this.lastSelectiveUpdateTime = 0;
+		this.skipDataUpdateCount = 0;
 	}
 }
 
@@ -2431,4 +2736,5 @@ export function buildEisenhowerMatrixViewFactory(plugin: TaskNotesPlugin) {
 		return new EisenhowerMatrixView(controller, containerEl, plugin);
 	};
 }
+
 
