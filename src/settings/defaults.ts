@@ -158,6 +158,7 @@ export const DEFAULT_CALENDAR_VIEW_SETTINGS: CalendarViewSettings = {
 	defaultShowScheduled: true,
 	defaultShowDue: true,
 	defaultShowDueWhenScheduled: true,
+	defaultShowScheduledToDueSpan: false, // Off by default - opt-in feature
 	defaultShowTimeEntries: false,
 	defaultShowRecurring: true,
 	defaultShowICSEvents: true,
@@ -188,6 +189,9 @@ export const DEFAULT_ICS_INTEGRATION_SETTINGS: ICSIntegrationSettings = {
 	enableAutoExport: false,
 	autoExportPath: "tasknotes-calendar.ics",
 	autoExportInterval: 60, // 60 minutes by default
+	useDurationForExport: false, // Preserve existing behavior: use due date as DTEND
+	// Task creation defaults
+	useICSEndAsDue: false, // Preserve existing behavior: don't set due date from ICS events
 };
 
 export const DEFAULT_PROJECT_AUTOSUGGEST: ProjectAutosuggestSettings = {
@@ -263,6 +267,7 @@ export const DEFAULT_SETTINGS: TaskNotesSettings = {
 	pomodoroSoundEnabled: true,
 	pomodoroSoundVolume: 50,
 	pomodoroStorageLocation: "plugin",
+	pomodoroMobileSidebar: "tab",
 	// Editor defaults
 	enableTaskLinkOverlay: true,
 	enableInstantTaskConvert: true,
@@ -349,6 +354,7 @@ export const DEFAULT_SETTINGS: TaskNotesSettings = {
 	inlineVisibleProperties: ["status", "priority", "due", "scheduled", "recurrence"],
 	// Bases integration defaults
 	enableBases: true,
+	autoCreateDefaultBasesFiles: true, // Auto-create missing default Base files on startup
 	// Command-to-file mappings for view commands (v4)
 	commandFileMapping: {
 		'open-calendar-view': 'TaskNotes/Views/mini-calendar-default.base',

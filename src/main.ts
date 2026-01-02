@@ -504,9 +504,11 @@ export default class TaskNotesPlugin extends Plugin {
 		this.initializationComplete = true;
 
 		try {
-			// Ensure default Bases command files exist
+			// Ensure default Bases command files exist (if auto-creation is enabled)
 			// Deferred to here (after layout ready) to avoid race conditions with file explorer cache
-			await this.ensureBasesViewFiles();
+			if (this.settings.autoCreateDefaultBasesFiles) {
+				await this.ensureBasesViewFiles();
+			}
 
 			// Inject dynamic styles for custom statuses and priorities
 			this.injectCustomStyles();
@@ -1450,6 +1452,31 @@ export default class TaskNotesPlugin extends Plugin {
 		this.emitter.trigger("settings-changed", this.settings);
 	}
 
+	async onExternalSettingsChange(): Promise<void> {
+		await this.loadSettings();
+
+		// Update all services with new settings
+		this.fieldMapper?.updateMapping(this.settings.fieldMapping);
+		this.statusManager?.updateStatuses(this.settings.customStatuses);
+		this.priorityManager?.updatePriorities(this.settings.customPriorities);
+
+		// External changes may include cache settings - update unconditionally
+		this.cacheManager.updateConfig(this.settings);
+		this.updatePreviousCacheSettings();
+
+		// Re-setup time tracking (may have changed)
+		this.setupTimeTrackingEventListeners();
+
+		// Update UI
+		this.injectCustomStyles();
+		this.statusBarService?.updateVisibility();
+		this.filterService?.refreshFilterOptions();
+
+		// Notify views
+		this.notifyDataChanged();
+		this.emitter.trigger("settings-changed", this.settings);
+	}
+
 	addCommands() {
 		this.commandDefinitions = [
 			{
@@ -1761,6 +1788,40 @@ export default class TaskNotesPlugin extends Plugin {
 	}
 
 	async activatePomodoroView() {
+		// On mobile, optionally open in sidebar based on user setting
+		if (Platform.isMobile && this.settings.pomodoroMobileSidebar !== "tab") {
+			const { workspace } = this.app;
+
+			// Check if view already exists
+			let leaf = this.getLeafOfType(POMODORO_VIEW_TYPE);
+
+			if (!leaf) {
+				// Create in the appropriate sidebar
+				const sidebarLeaf =
+					this.settings.pomodoroMobileSidebar === "left"
+						? workspace.getLeftLeaf(false)
+						: workspace.getRightLeaf(false);
+
+				if (sidebarLeaf) {
+					leaf = sidebarLeaf;
+					await leaf.setViewState({
+						type: POMODORO_VIEW_TYPE,
+						active: true,
+					});
+				} else {
+					// Fallback to tab if sidebar not available
+					return this.activateView(POMODORO_VIEW_TYPE);
+				}
+			}
+
+			// Make this leaf active and ensure it's visible
+			workspace.setActiveLeaf(leaf, { focus: true });
+			workspace.revealLeaf(leaf);
+
+			return leaf;
+		}
+
+		// Desktop or "tab" setting: use standard view activation
 		return this.activateView(POMODORO_VIEW_TYPE);
 	}
 
@@ -2018,11 +2079,13 @@ export default class TaskNotesPlugin extends Plugin {
 	}
 
 	async navigateToCurrentDailyNote() {
-		const date = new Date();
-		await this.navigateToDailyNote(date);
+		// Fix for issue #1223: Use getTodayLocal() to get the correct local calendar date
+		// instead of new Date() which would be incorrectly converted by convertUTCToLocalCalendarDate()
+		const date = getTodayLocal();
+		await this.navigateToDailyNote(date, { isAlreadyLocal: true });
 	}
 
-	async navigateToDailyNote(date: Date) {
+	async navigateToDailyNote(date: Date, options?: { isAlreadyLocal?: boolean }) {
 		try {
 			// Check if Daily Notes plugin is enabled
 			if (!appHasDailyNotesPluginLoaded()) {
@@ -2035,7 +2098,8 @@ export default class TaskNotesPlugin extends Plugin {
 			// Convert date to moment for the API
 			// Fix for issue #857: Convert UTC-anchored date to local calendar date
 			// before passing to moment() to ensure correct day is used
-			const localDate = convertUTCToLocalCalendarDate(date);
+			// Fix for issue #1223: Skip conversion if the date is already local (e.g., from getTodayLocal())
+			const localDate = options?.isAlreadyLocal ? date : convertUTCToLocalCalendarDate(date);
 			const moment = (window as Window & { moment: (date: Date) => any }).moment(localDate);
 
 			// Get all daily notes to check if one exists for this date
@@ -2230,12 +2294,13 @@ export default class TaskNotesPlugin extends Plugin {
 
 		// Build a TaskInfo object from the note's existing data
 		// Use defaults for required fields that don't exist
+		// Use ?? (nullish coalescing) to properly handle empty string defaults
 		const now = getCurrentTimestamp();
 		const taskInfo: TaskInfo = {
 			path: activeFile.path,
 			title: frontmatter.title || activeFile.basename,
-			status: frontmatter.status || this.settings.defaultTaskStatus,
-			priority: frontmatter.priority || this.settings.defaultTaskPriority,
+			status: frontmatter.status ?? this.settings.defaultTaskStatus,
+			priority: frontmatter.priority ?? this.settings.defaultTaskPriority,
 			archived: false,
 			due: frontmatter.due || undefined,
 			scheduled: frontmatter.scheduled || undefined,
@@ -2470,9 +2535,9 @@ export default class TaskNotesPlugin extends Plugin {
 	/**
 	 * Opens the task edit modal for a specific task
 	 */
-	async openTaskEditModal(task: TaskInfo) {
+	async openTaskEditModal(task: TaskInfo, onTaskUpdated?: (task: TaskInfo) => void) {
 		// With native cache, task data is always current - no need to refetch
-		new TaskEditModal(this.app, this, { task }).open();
+		new TaskEditModal(this.app, this, { task, onTaskUpdated }).open();
 	}
 
 	/**
@@ -2683,13 +2748,16 @@ export default class TaskNotesPlugin extends Plugin {
 	/**
 	 * Open time entry editor modal for a specific task
 	 */
-	openTimeEntryEditor(task: TaskInfo): void {
+	openTimeEntryEditor(task: TaskInfo, onSave?: () => void): void {
 		const modal = new TimeEntryEditorModal(this.app, this, task, async (updatedEntries) => {
 			try {
 				// Save to file
 				await this.taskService.updateTask(task, {
 					timeEntries: updatedEntries,
 				});
+
+				// Signal immediate update before triggering data change
+				onSave?.();
 
 				// Note: updateTask in TaskService already triggers EVENT_TASK_UPDATED internally
 				// We just need to trigger EVENT_DATA_CHANGED

@@ -38,6 +38,8 @@ import { DEFAULT_INTERNAL_VISIBLE_PROPERTIES } from "../settings/defaults";
 export interface TaskCardOptions {
 	targetDate?: Date;
 	layout?: "default" | "compact" | "inline";
+	/** When true, hide status indicator (e.g., when Kanban is grouped by status) */
+	hideStatusIndicator?: boolean;
 }
 
 export const DEFAULT_TASK_CARD_OPTIONS: TaskCardOptions = {
@@ -160,14 +162,16 @@ function createStatusCycleHandler(
 				// Update card classes
 				updateCardCompletionState(card, task, plugin, isNowCompleted, newEffectiveStatus);
 			} else {
-				// For regular tasks, cycle to next status
+				// For regular tasks, cycle to next/previous status based on shift key
 				const freshTask = await plugin.cacheManager.getTaskInfo(task.path);
 				if (!freshTask) {
 					new Notice("Task not found");
 					return;
 				}
 				const currentStatus = freshTask.status || "open";
-				const nextStatus = plugin.statusManager.getNextStatus(currentStatus);
+				const nextStatus = e.shiftKey
+					? plugin.statusManager.getPreviousStatus(currentStatus)
+					: plugin.statusManager.getNextStatus(currentStatus);
 				await plugin.updateTaskProperty(freshTask, "status", nextStatus);
 			}
 		} catch (error) {
@@ -1191,7 +1195,9 @@ function renderDueDateProperty(
 	plugin: TaskNotesPlugin
 ): void {
 	const isDueToday = isTodayTimeAware(due);
-	const isDueOverdue = isOverdueTimeAware(due);
+	const isCompleted = plugin.statusManager.isCompletedStatus(task.status);
+	const hideCompletedFromOverdue = plugin.settings?.hideCompletedFromOverdue ?? true;
+	const isDueOverdue = isOverdueTimeAware(due, isCompleted, hideCompletedFromOverdue);
 
 	const userTimeFormat = plugin.settings.calendarViewSettings.timeFormat;
 	let dueDateText = "";
@@ -1239,7 +1245,9 @@ function renderScheduledDateProperty(
 	plugin: TaskNotesPlugin
 ): void {
 	const isScheduledToday = isTodayTimeAware(scheduled);
-	const isScheduledPast = isOverdueTimeAware(scheduled);
+	const isCompleted = plugin.statusManager.isCompletedStatus(task.status);
+	const hideCompletedFromOverdue = plugin.settings?.hideCompletedFromOverdue ?? true;
+	const isScheduledPast = isOverdueTimeAware(scheduled, isCompleted, hideCompletedFromOverdue);
 
 	const userTimeFormat = plugin.settings.calendarViewSettings.timeFormat;
 	let scheduledDateText = "";
@@ -1410,11 +1418,12 @@ export function createTaskCard(
 		card.style.setProperty("--next-status-color", nextStatusConfig.color);
 	}
 
-	// Status indicator dot (conditional based on visible properties)
+	// Status indicator dot (conditional based on visible properties and options)
 	let statusDot: HTMLElement | null = null;
 	const shouldShowStatus =
-		!visibleProperties ||
-		visibleProperties.some((prop) => isPropertyForField(prop, "status", plugin));
+		!opts.hideStatusIndicator &&
+		(!visibleProperties ||
+			visibleProperties.some((prop) => isPropertyForField(prop, "status", plugin)));
 	if (shouldShowStatus) {
 		statusDot = mainRow.createEl("span", { cls: "task-card__status-dot" });
 		if (statusConfig) {
@@ -1897,7 +1906,7 @@ export function updateTaskCard(
 							titleContainer.classList.toggle("completed", isNowCompleted);
 						}
 					} else {
-						// For regular tasks, cycle to next status
+						// For regular tasks, cycle to next/previous status based on shift key
 						// Get fresh task data to ensure we have the latest status
 						const freshTask = await plugin.cacheManager.getTaskInfo(task.path);
 						if (!freshTask) {
@@ -1906,7 +1915,9 @@ export function updateTaskCard(
 						}
 
 						const currentStatus = freshTask.status || "open";
-						const nextStatus = plugin.statusManager.getNextStatus(currentStatus);
+						const nextStatus = e.shiftKey
+							? plugin.statusManager.getPreviousStatus(currentStatus)
+							: plugin.statusManager.getNextStatus(currentStatus);
 						await plugin.updateTaskProperty(freshTask, "status", nextStatus);
 					}
 				} catch (error) {
@@ -2338,7 +2349,8 @@ export async function toggleSubtasks(
 			// Show subtasks
 			if (!subtasksContainer) {
 				// Create subtasks container after the main content
-				subtasksContainer = document.createElement("div");
+				// Use card.ownerDocument for pop-out window support
+				subtasksContainer = card.ownerDocument.createElement("div");
 				subtasksContainer.className = "task-card__subtasks";
 
 				// Prevent clicks inside subtasks container from bubbling to parent card

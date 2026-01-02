@@ -97,6 +97,12 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 						default: true,
 					},
 					{
+						type: "toggle",
+						key: "consolidateStatusIcon",
+						displayName: "Show status icon in column header only",
+						default: false,
+					},
+					{
 						type: "multitext",
 						key: "columnOrder",
 						displayName: "Column Order (Advanced)",
@@ -364,6 +370,12 @@ export async function registerBasesTaskList(plugin: TaskNotesPlugin): Promise<vo
 										min: 0,
 										max: 10,
 										step: 1,
+									},
+									{
+										type: "toggle",
+										key: "showScheduledToDueSpan",
+										displayName: t("layout.spanScheduledToDue"),
+										default: calendarSettings.defaultShowScheduledToDueSpan,
 									},
 								],
 							},

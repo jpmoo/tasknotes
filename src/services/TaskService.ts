@@ -58,10 +58,10 @@ export class TaskService {
 	}
 
 	/**
-	 * Sanitize title by removing problematic characters that could cause issues
-	 * This ensures consistency between what's stored and what's returned
+	 * Sanitize title by removing problematic characters that could cause issues in filenames
+	 * This is used when storeTitleInFilename is true, to ensure the title is safe for filenames
 	 */
-	private sanitizeTitle(input: string): string {
+	private sanitizeTitleForFilename(input: string): string {
 		if (!input || typeof input !== "string") {
 			return "untitled";
 		}
@@ -81,6 +81,40 @@ export class TaskService {
 				})
 				// Remove leading/trailing dots
 				.replace(/^\.+|\.+$/g, "")
+				// Final trim in case we removed characters at the edges
+				.trim();
+
+			// Additional validation
+			if (!sanitized || sanitized.length === 0) {
+				sanitized = "untitled";
+			}
+
+			return sanitized;
+		} catch (error) {
+			console.error("Error sanitizing title:", error);
+			return "untitled";
+		}
+	}
+
+	/**
+	 * Minimal sanitization for titles stored in frontmatter (not used in filename)
+	 * Only removes control characters and normalizes whitespace, preserving special characters like ?
+	 */
+	private sanitizeTitleForStorage(input: string): string {
+		if (!input || typeof input !== "string") {
+			return "untitled";
+		}
+
+		try {
+			let sanitized = input
+				.trim()
+				// Replace multiple spaces with single space
+				.replace(/\s+/g, " ")
+				// Remove control characters only
+				.replace(/./g, (char) => {
+					const code = char.charCodeAt(0);
+					return code <= 31 || (code >= 127 && code <= 159) ? "" : char;
+				})
 				// Final trim in case we removed characters at the edges
 				.trim();
 
@@ -196,8 +230,11 @@ export class TaskService {
 				throw new Error("Title is required");
 			}
 
-			// Apply defaults for missing fields and sanitize title for consistent behavior
-			const title = this.sanitizeTitle(taskData.title.trim());
+			// Apply defaults for missing fields and sanitize title
+			// Use stricter sanitization only when title is used in filename
+			const title = this.plugin.settings.storeTitleInFilename
+				? this.sanitizeTitleForFilename(taskData.title.trim())
+				: this.sanitizeTitleForStorage(taskData.title.trim());
 			const priority = taskData.priority || this.plugin.settings.defaultTaskPriority;
 			const status = taskData.status || this.plugin.settings.defaultTaskStatus;
 			const dateCreated = taskData.dateCreated || getCurrentTimestamp();
@@ -231,8 +268,8 @@ export class TaskService {
 			// Determine folder based on creation context
 			// Process folder templates with task and date variables for dynamic folder organization
 			let folder = "";
-			if (taskData.creationContext === "inline-conversion") {
-				// For inline conversion, use the inline task folder setting with variable support
+			if (taskData.creationContext === "inline-conversion" || taskData.creationContext === "manual-creation") {
+				// For inline conversion and manual creation, use the inline task folder setting with variable support
 				const inlineFolder = this.plugin.settings.inlineTaskConvertFolder || "";
 				if (inlineFolder.trim()) {
 					// Inline folder is configured, use it

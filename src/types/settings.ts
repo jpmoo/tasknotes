@@ -121,6 +121,7 @@ export interface TaskNotesSettings {
 	pomodoroSoundEnabled: boolean;
 	pomodoroSoundVolume: number; // 0-100
 	pomodoroStorageLocation: "plugin" | "daily-notes"; // where to store pomodoro history data
+	pomodoroMobileSidebar: "tab" | "left" | "right"; // where to open pomodoro view on mobile
 	// Editor settings
 	enableTaskLinkOverlay: boolean;
 	enableInstantTaskConvert: boolean;
@@ -201,6 +202,7 @@ export interface TaskNotesSettings {
 	inlineVisibleProperties?: string[];
 	// Bases integration settings
 	enableBases: boolean;
+	autoCreateDefaultBasesFiles: boolean; // Auto-create missing default Base files on startup
 	// Command-to-file mappings for view commands (v4)
 	commandFileMapping: {
 		'open-calendar-view': string;
@@ -278,6 +280,9 @@ export interface ICSIntegrationSettings {
 	enableAutoExport: boolean; // Whether to automatically export tasks to ICS file
 	autoExportPath: string; // Path where the ICS file should be saved
 	autoExportInterval: number; // Export interval in minutes (default: 60)
+	useDurationForExport: boolean; // Whether to use timeEstimate (duration) instead of due date for DTEND
+	// Task creation from ICS events
+	useICSEndAsDue: boolean; // Whether to use ICS event end time as task due date
 }
 
 export interface CalendarViewSettings {
@@ -306,6 +311,7 @@ export interface CalendarViewSettings {
 	defaultShowScheduled: boolean;
 	defaultShowDue: boolean;
 	defaultShowDueWhenScheduled: boolean;
+	defaultShowScheduledToDueSpan: boolean; // Show multi-day span from scheduled to due
 	defaultShowTimeEntries: boolean;
 	defaultShowRecurring: boolean;
 	defaultShowICSEvents: boolean;

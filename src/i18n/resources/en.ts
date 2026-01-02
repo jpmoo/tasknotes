@@ -20,6 +20,7 @@ export const en: TranslationTree = {
 			es: "Spanish",
 			ja: "Japanese",
 			pt: "Portuguese (Brazil)",
+			ko: "Korean",
 		},
 		weekdays: {
 			sunday: "Sunday",
@@ -178,6 +179,15 @@ export const en: TranslationTree = {
 			},
 			hints: {
 				refresh: "Refresh calendar subscriptions",
+				today: "Go to today",
+				prev: "Previous",
+				next: "Next",
+				month: "Month view",
+				week: "Week view",
+				day: "Day view",
+				year: "Year view",
+				list: "List view",
+				customDays: "{count}-day view",
 			},
 			settings: {
 				groups: {
@@ -237,6 +247,7 @@ export const en: TranslationTree = {
 					eventMaxStack: "Max stacked events (week/day view, 0 = unlimited)",
 					dayMaxEvents: "Max events per day (month view, 0 = auto)",
 					dayMaxEventRows: "Max event rows per day (month view, 0 = unlimited)",
+					spanScheduledToDue: "Span tasks between scheduled and due dates",
 				},
 				propertyBasedEvents: {
 					startDateProperty: "Start date property",
@@ -265,6 +276,8 @@ export const en: TranslationTree = {
 			errors: {
 				loadingBoard: "Error loading board.",
 				noGroupBy: "Kanban view requires a 'Group by' property to be configured. Click the 'Sort' button and select a property under 'Group by'.",
+				formulaGroupingReadOnly: "Cannot move tasks between formula-based columns. Formula values are computed and cannot be directly modified.",
+				formulaSwimlaneReadOnly: "Cannot move tasks between formula-based swimlanes. Formula values are computed and cannot be directly modified.",
 			},
 			columnTitle: "Untitled",
 		},
@@ -498,6 +511,13 @@ export const en: TranslationTree = {
 				notifications: {
 					name: "Pomodoro notifications",
 					description: "Show notifications when Pomodoro sessions end",
+				},
+				mobileSidebar: {
+					name: "Mobile sidebar",
+					description: "Where to open the Pomodoro timer on mobile devices",
+					tab: "Note panel",
+					left: "Left sidebar",
+					right: "Right sidebar",
 				},
 			},
 			uiLanguage: {
@@ -1511,6 +1531,10 @@ export const en: TranslationTree = {
 					resetButton: "Reset",
 					resetTooltip: "Reset to default path",
 				},
+				autoCreateDefaultFiles: {
+					name: "Auto-create default files",
+					description: "Automatically create missing default Base view files on startup. Disable to prevent deleted sample files from being recreated.",
+				},
 				createDefaultFiles: {
 					name: "Create default files",
 					description: "Create the default .base files in TaskNotes/Views/ directory. Existing files will not be overwritten.",
@@ -1561,6 +1585,10 @@ export const en: TranslationTree = {
 					name: "Custom ICS filename template",
 					description: "Template for custom ICS event filenames",
 					placeholder: "{date}-{title}",
+				},
+				useICSEndAsDue: {
+					name: "Use ICS event end time as task due date",
+					description: "When enabled, tasks created from calendar events will have their due date set to the event's end time. For all-day events, the due date will be set to the event date. For timed events, the due date will include the end time.",
 				},
 			},
 			subscriptionsList: {
@@ -1648,6 +1676,11 @@ export const en: TranslationTree = {
 					name: "Update interval (between 5 and 1440 minutes)",
 					description: "How often to update the export file",
 					placeholder: "60",
+				},
+				useDuration: {
+					name: "Use task duration for event length",
+					description:
+						"When enabled, uses the task's time estimate (duration) instead of due date for the calendar event end time. This is useful for GTD workflows where scheduled + duration represents work planning, while due date represents deadlines.",
 				},
 				exportNow: {
 					name: "Export now",
@@ -2554,6 +2587,9 @@ export const en: TranslationTree = {
 				copyUrlSuccess: "Obsidian URL copied to clipboard",
 				updateRecurrenceFailure: "Failed to update task recurrence: {message}",
 			},
+		},
+		priority: {
+			clearPriority: "Clear priority",
 		},
 		ics: {
 			showDetails: "Show details",
