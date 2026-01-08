@@ -34,6 +34,7 @@ import {
 	normalizeDependencyList,
 	resolveDependencyEntry,
 } from "../utils/dependencyUtils";
+import { getProjectDisplayName } from "../utils/linkUtils";
 import {
 	formatDateForStorage,
 	getCurrentDateString,
@@ -268,8 +269,8 @@ export class TaskService {
 			// Determine folder based on creation context
 			// Process folder templates with task and date variables for dynamic folder organization
 			let folder = "";
-			if (taskData.creationContext === "inline-conversion" || taskData.creationContext === "manual-creation") {
-				// For inline conversion and manual creation, use the inline task folder setting with variable support
+			if (taskData.creationContext === "inline-conversion" || taskData.creationContext === "modal-inline-creation") {
+				// For inline conversion and modal-based inline task creation, use the inline task folder setting with variable support
 				const inlineFolder = this.plugin.settings.inlineTaskConvertFolder || "";
 				if (inlineFolder.trim()) {
 					// Inline folder is configured, use it
@@ -344,10 +345,15 @@ export class TaskService {
 				icsEventId: taskData.icsEventId || undefined,
 			};
 
+			const shouldAddTaskTag = this.plugin.settings.taskIdentificationMethod === "tag";
+			const taskTagForFrontmatter = shouldAddTaskTag
+				? this.plugin.settings.taskTag
+				: undefined;
+
 			// Use field mapper to convert to frontmatter with proper field mapping
 			const frontmatter = this.plugin.fieldMapper.mapToFrontmatter(
 				completeTaskData,
-				this.plugin.settings.taskTag,
+				taskTagForFrontmatter,
 				this.plugin.settings.storeTitleInFilename
 			);
 
@@ -362,12 +368,8 @@ export class TaskService {
 						lower === "true" || lower === "false" ? lower === "true" : propValue;
 					frontmatter[propName] = coercedValue as any;
 				}
-				// Remove task tag from tags array if using property identification
-				const filteredTags = tagsArray.filter(
-					(tag: string) => tag !== this.plugin.settings.taskTag
-				);
-				if (filteredTags.length > 0) {
-					frontmatter.tags = filteredTags;
+				if (tagsArray.length > 0) {
+					frontmatter.tags = tagsArray;
 				}
 			} else {
 				// Tags are handled separately (not via field mapper)
@@ -444,6 +446,16 @@ export class TaskService {
 				} catch (error) {
 					console.warn("Failed to trigger webhook for task creation:", error);
 				}
+			}
+
+			// Sync to Google Calendar if enabled (fire-and-forget to avoid blocking modal)
+			if (
+				this.plugin.taskCalendarSyncService?.isEnabled() &&
+				this.plugin.settings.googleCalendarExport.syncOnTaskCreate
+			) {
+				this.plugin.taskCalendarSyncService.syncTaskToCalendar(taskInfo).catch((error) => {
+					console.warn("Failed to sync task to Google Calendar:", error);
+				});
 			}
 
 			return { file, taskInfo };
@@ -833,6 +845,27 @@ export class TaskService {
 				}
 			}
 
+			// Sync to Google Calendar if enabled (fire-and-forget to avoid blocking modal)
+			if (this.plugin.taskCalendarSyncService?.isEnabled()) {
+				const wasCompleted = this.plugin.statusManager.isCompletedStatus(task.status);
+				const isCompleted =
+					property === "status" && this.plugin.statusManager.isCompletedStatus(value);
+
+				const syncPromise =
+					property === "status" && !wasCompleted && isCompleted
+						? this.plugin.taskCalendarSyncService.completeTaskInCalendar(
+								updatedTask as TaskInfo
+							)
+						: this.plugin.taskCalendarSyncService.updateTaskInCalendar(
+								updatedTask as TaskInfo,
+								task
+							);
+
+				syncPromise.catch((error) => {
+					console.warn("Failed to sync task update to Google Calendar:", error);
+				});
+			}
+
 			// Handle auto-archive if status property changed
 			if (this.autoArchiveService && property === "status" && value !== task.status) {
 				try {
@@ -1053,6 +1086,27 @@ export class TaskService {
 				}
 			} catch (error) {
 				console.warn("Failed to trigger webhook for task archive/unarchive:", error);
+			}
+		}
+
+		// Sync to Google Calendar if enabled
+		// Archiving removes from calendar (archived tasks aren't synced)
+		// Unarchiving may re-add to calendar
+		if (this.plugin.taskCalendarSyncService?.isEnabled()) {
+			if (updatedTask.archived && task.googleCalendarEventId) {
+				// Task is being archived - delete the calendar event
+				this.plugin.taskCalendarSyncService
+					.deleteTaskFromCalendar(updatedTask)
+					.catch((error) => {
+						console.warn("Failed to delete archived task from Google Calendar:", error);
+					});
+			} else if (!updatedTask.archived) {
+				// Task is being unarchived - sync it back if eligible
+				this.plugin.taskCalendarSyncService
+					.updateTaskInCalendar(updatedTask, task)
+					.catch((error) => {
+						console.warn("Failed to sync unarchived task to Google Calendar:", error);
+					});
 			}
 		}
 
@@ -1425,23 +1479,12 @@ export class TaskService {
 				}
 
 				if (updates.hasOwnProperty("tags")) {
-					let tagsToSet = updates.tags;
-					// Remove task tag if using property identification
-					if (this.plugin.settings.taskIdentificationMethod === "property" && tagsToSet) {
-						tagsToSet = tagsToSet.filter(
-							(tag: string) => tag !== this.plugin.settings.taskTag
-						);
+					const tagsToSet = Array.isArray(updates.tags) ? [...updates.tags] : [];
+					if (tagsToSet.length > 0) {
+						frontmatter.tags = tagsToSet;
+					} else {
+						delete frontmatter.tags;
 					}
-					frontmatter.tags = tagsToSet;
-				} else if (originalTask.tags) {
-					let tagsToSet = originalTask.tags;
-					// Remove task tag if using property identification
-					if (this.plugin.settings.taskIdentificationMethod === "property") {
-						tagsToSet = tagsToSet.filter(
-							(tag: string) => tag !== this.plugin.settings.taskTag
-						);
-					}
-					frontmatter.tags = tagsToSet;
 				}
 
 			});
@@ -1605,6 +1648,28 @@ export class TaskService {
 				}
 			}
 
+			// Sync to Google Calendar if enabled (fire-and-forget to avoid blocking modal)
+			if (this.plugin.taskCalendarSyncService?.isEnabled()) {
+				const wasCompleted = this.plugin.statusManager.isCompletedStatus(
+					originalTask.status
+				);
+				const isCompleted = this.plugin.statusManager.isCompletedStatus(
+					updatedTask.status
+				);
+
+				const syncPromise =
+					!wasCompleted && isCompleted
+						? this.plugin.taskCalendarSyncService.completeTaskInCalendar(updatedTask)
+						: this.plugin.taskCalendarSyncService.updateTaskInCalendar(
+								updatedTask,
+								originalTask
+							);
+
+				syncPromise.catch((error) => {
+					console.warn("Failed to sync task update to Google Calendar:", error);
+				});
+			}
+
 			// Handle auto-archive if status changed
 			if (
 				this.autoArchiveService &&
@@ -1765,6 +1830,16 @@ export class TaskService {
 			const file = this.plugin.app.vault.getAbstractFileByPath(task.path);
 			if (!(file instanceof TFile)) {
 				throw new Error(`Cannot find task file: ${task.path}`);
+			}
+
+			// Delete from Google Calendar first (before file deletion, so we have the event ID)
+			// Fire-and-forget to avoid blocking the delete operation
+			if (this.plugin.taskCalendarSyncService?.isEnabled() && task.googleCalendarEventId) {
+				this.plugin.taskCalendarSyncService
+					.deleteTaskFromCalendarByPath(task.path, task.googleCalendarEventId)
+					.catch((error) => {
+						console.warn("Failed to delete task from Google Calendar:", error);
+					});
 			}
 
 			// Step 1: Delete the file from the vault
@@ -1985,7 +2060,17 @@ export class TaskService {
 			}
 		}
 
-		// Step 6: Return authoritative data
+		// Step 6: Sync to Google Calendar if enabled (scheduled date changed)
+		if (this.plugin.taskCalendarSyncService?.isEnabled()) {
+			// Recurring task completion updates the scheduled date to next occurrence
+			this.plugin.taskCalendarSyncService
+				.updateTaskInCalendar(updatedTask, freshTask)
+				.catch((error) => {
+					console.warn("Failed to sync recurring task update to Google Calendar:", error);
+				});
+		}
+
+		// Step 7: Return authoritative data
 		return updatedTask;
 	}
 
@@ -2127,7 +2212,17 @@ export class TaskService {
 			}
 		}
 
-		// Step 7: Return authoritative data
+		// Step 7: Sync to Google Calendar if enabled (scheduled date changed)
+		if (this.plugin.taskCalendarSyncService?.isEnabled()) {
+			// Skipping a recurring task updates the scheduled date to next occurrence
+			this.plugin.taskCalendarSyncService
+				.updateTaskInCalendar(updatedTask, freshTask)
+				.catch((error) => {
+					console.warn("Failed to sync recurring task skip to Google Calendar:", error);
+				});
+		}
+
+		// Step 8: Return authoritative data
 		return updatedTask;
 	}
 
@@ -2231,41 +2326,6 @@ export class TaskService {
 	 * - "simple string" -> "simple string"
 	 */
 	private extractProjectBasename(project: string): string {
-		if (!project) return "";
-
-		// Check if it's a wikilink format [[...]]
-		const linkMatch = project.match(/^\[\[([^\]]+)\]\]$/);
-		if (linkMatch) {
-			const linkContent = linkMatch[1];
-
-			// Handle pipe syntax: "path|display" -> use "display"
-			if (linkContent.includes("|")) {
-				return linkContent.split("|")[1].trim();
-			}
-
-			// Try to resolve the file using Obsidian's metadata cache
-			if (this.plugin.app?.metadataCache) {
-				try {
-					const file = this.plugin.app.metadataCache.getFirstLinkpathDest(
-						linkContent,
-						""
-					);
-					if (file) {
-						// Return the file's basename (name without extension)
-						return file.basename;
-					}
-				} catch (error) {
-					// File resolution failed, fall back to manual extraction
-					console.debug("Error resolving project file:", error);
-				}
-			}
-
-			// Fallback: extract basename manually from the path
-			const pathParts = linkContent.split("/");
-			return pathParts[pathParts.length - 1] || linkContent;
-		}
-
-		// For non-wikilink strings, return as-is
-		return project;
+		return getProjectDisplayName(project, this.plugin.app);
 	}
 }

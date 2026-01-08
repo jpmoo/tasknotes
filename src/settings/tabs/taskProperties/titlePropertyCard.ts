@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import TaskNotesPlugin from "../../../main";
 import {
 	createCard,
@@ -153,10 +154,48 @@ function renderFilenameSettingsContent(
 			plugin.settings.customFilenameTemplate
 		);
 		templateInput.style.width = "100%";
+
+		// Warning container for legacy syntax
+		const warningContainer = container.createDiv();
+
+		const updateWarning = () => {
+			warningContainer.empty();
+			// Check for single-brace syntax that isn't part of double-brace
+			// Match {word} but not {{word}}
+			// Avoid lookbehind for iOS compatibility (iOS < 16.4 doesn't support lookbehind)
+			const template = templateInput.value;
+			// First check if there are any single braces at all
+			const singleBracePattern = /\{[a-zA-Z]+\}/g;
+			const doubleBracePattern = /\{\{[a-zA-Z]+\}\}/g;
+			// Remove all double-brace patterns, then check for remaining single-brace
+			const withoutDoubleBraces = template.replace(doubleBracePattern, "");
+			const hasLegacySyntax = singleBracePattern.test(withoutDoubleBraces);
+
+			if (hasLegacySyntax) {
+				const warningEl = warningContainer.createDiv({
+					cls: "setting-item-description mod-warning",
+				});
+				warningEl.style.color = "var(--text-warning)";
+				warningEl.style.marginTop = "8px";
+				warningEl.style.display = "flex";
+				warningEl.style.alignItems = "flex-start";
+				warningEl.style.gap = "6px";
+
+				const iconEl = warningEl.createSpan();
+				setIcon(iconEl, "alert-triangle");
+				iconEl.style.flexShrink = "0";
+
+				const textEl = warningEl.createSpan();
+				textEl.textContent = translate("settings.taskProperties.titleCard.legacySyntaxWarning");
+			}
+		};
+
 		templateInput.addEventListener("change", () => {
 			plugin.settings.customFilenameTemplate = templateInput.value;
 			save();
+			updateWarning();
 		});
+		templateInput.addEventListener("input", updateWarning);
 		templateContainer.appendChild(templateInput);
 
 		// Help text for template variables
@@ -164,5 +203,8 @@ function renderFilenameSettingsContent(
 			text: translate("settings.appearance.taskFilenames.customTemplate.helpText"),
 			cls: "setting-item-description",
 		});
+
+		// Initial warning check
+		updateWarning();
 	}
 }
