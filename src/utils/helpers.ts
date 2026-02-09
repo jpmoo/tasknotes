@@ -859,16 +859,18 @@ export function updateToNextScheduledOccurrence(
 				const originalDue = task.due ? parseDateToUTC(task.due) : null;
 
 				if (originalScheduled && originalDue) {
-					// Calculate the time difference
+					// Calculate the time difference and apply to next occurrence
 					const offsetMs = originalDue.getTime() - originalScheduled.getTime();
-					if (nextOccurrence) {
-						// Apply the same offset to get the new due date
-						nextDueDate = new Date(nextOccurrence.getTime() + offsetMs);
-					}
+					nextDueDate = new Date(nextOccurrence.getTime() + offsetMs);
 				}
 			} catch (error) {
 				console.error("Error calculating next due date with offset:", error);
 			}
+		}
+		// If task has a due date but we didn't set nextDueDate (no scheduled for offset, or setting off),
+		// advance due to the next occurrence so it stays in sync
+		if (task.due && nextDueDate == null) {
+			nextDueDate = nextOccurrence;
 		}
 
 		// Preserve time component if original scheduled date had time

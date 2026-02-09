@@ -46,7 +46,7 @@ import { TaskEditModal } from "./modals/TaskEditModal";
 import { openTaskSelector } from "./modals/TaskSelectorWithCreateModal";
 import { TimeEntryEditorModal } from "./modals/TimeEntryEditorModal";
 import { PomodoroService } from "./services/PomodoroService";
-import { formatTime, getActiveTimeEntry } from "./utils/helpers";
+import { formatTime, getActiveTimeEntry, getInstanceDateToComplete } from "./utils/helpers";
 import { convertUTCToLocalCalendarDate, getCurrentTimestamp } from "./utils/dateUtils";
 import { TaskManager } from "./utils/TaskManager";
 import { DependencyCache } from "./utils/DependencyCache";
@@ -2307,20 +2307,19 @@ export default class TaskNotesPlugin extends Plugin {
 			// Let TaskService handle the date logic (defaults to local today, not selectedDate)
 			const updatedTask = await this.taskService.toggleRecurringTaskComplete(task, date);
 
-			// For notification, determine the actual completion date from the task
-			// Use local today if no explicit date provided
+			// For notification, use the same instance date the service used (may be today, past, or future)
 			const targetDate =
 				date ||
 				(() => {
 					const todayLocal = getTodayLocal();
 					return createUTCDateFromLocalCalendarDate(todayLocal);
 				})();
-
-			const dateStr = formatDateForStorage(targetDate);
+			const instanceDate = getInstanceDateToComplete(task, targetDate);
+			const dateStr = formatDateForStorage(instanceDate);
 			const wasCompleted = updatedTask.complete_instances?.includes(dateStr);
 			const action = wasCompleted ? "completed" : "marked incomplete";
 
-			// Format date for display: convert UTC-anchored date back to local display
+			// Format the instance date for display (not "today")
 			const displayDate = parseDateToLocal(dateStr);
 			new Notice(`Recurring task ${action} for ${format(displayDate, "MMM d")}`);
 			return updatedTask;

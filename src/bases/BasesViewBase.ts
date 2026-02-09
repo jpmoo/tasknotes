@@ -305,7 +305,7 @@ export abstract class BasesViewBase extends Component {
 				// Only check if method exists (EisenhowerMatrixView has it)
 				if ((this as any).isViewVisible && !(this as any).isViewVisible()) return;
 				
-				const updatedTask = eventData?.task || eventData?.taskInfo;
+				const updatedTask = eventData?.updatedTask || eventData?.task || eventData?.taskInfo;
 				if (!updatedTask?.path) return;
 
 				// Check 4: Task not relevant to this view (O(1) lookup)
@@ -314,6 +314,8 @@ export abstract class BasesViewBase extends Component {
 
 				// All checks passed - process the update
 				await this.handleTaskUpdate(updatedTask);
+				// Refresh view so filters/quadrants (e.g. Eisenhower Matrix) reflect the change
+				this.debouncedRefresh();
 			} catch (error) {
 				console.error("[TaskNotes][Bases] Error in task update handler:", error);
 				// Only debounce refresh if view is still visible
