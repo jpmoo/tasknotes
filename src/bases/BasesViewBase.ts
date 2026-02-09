@@ -25,6 +25,8 @@ export abstract class BasesViewBase extends Component {
 	protected propertyMapper: PropertyMappingService;
 	protected containerEl: HTMLElement;
 	protected rootElement: HTMLElement | null = null;
+	/** Bases controller; used to request query refresh so view gets updated filter results. */
+	protected controller: any = null;
 	protected taskUpdateListener: any = null;
 	protected updateDebounceTimer: number | null = null;
 	protected dataUpdateDebounceTimer: number | null = null;
@@ -45,6 +47,7 @@ export abstract class BasesViewBase extends Component {
 		super();
 		this.plugin = plugin;
 		this.containerEl = containerEl;
+		this.controller = controller;
 
 		// Note: app, config, and data will be set by Bases when it creates the view
 		// We just need to ensure our types match the BasesView interface
@@ -314,8 +317,17 @@ export abstract class BasesViewBase extends Component {
 
 				// All checks passed - process the update
 				await this.handleTaskUpdate(updatedTask);
-				// Refresh view so filters/quadrants (e.g. Eisenhower Matrix) reflect the change
-				this.debouncedRefresh();
+				// Request Bases to re-run its query so this.data reflects updated filters (e.g. task no longer matches)
+				if (typeof this.controller?.runQuery === "function") {
+					try {
+						await this.controller.runQuery();
+					} catch (runQueryError) {
+						console.debug("[TaskNotes][Bases] runQuery failed, falling back to debouncedRefresh:", runQueryError);
+						this.debouncedRefresh();
+					}
+				} else {
+					this.debouncedRefresh();
+				}
 			} catch (error) {
 				console.error("[TaskNotes][Bases] Error in task update handler:", error);
 				// Only debounce refresh if view is still visible

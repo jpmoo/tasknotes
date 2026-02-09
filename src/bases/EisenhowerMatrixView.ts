@@ -5,8 +5,8 @@ import { TaskInfo } from "../types";
 import { identifyTaskNotesFromBasesData } from "./helpers";
 import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
-import { getEffectiveTaskStatus, getNextUncompletedOccurrence } from "../utils/helpers";
-import { createUTCDateFromLocalCalendarDate, formatDateForStorage, getTodayLocal } from "../utils/dateUtils";
+import { getEffectiveTaskStatus } from "../utils/helpers";
+import { createUTCDateFromLocalCalendarDate, getTodayLocal } from "../utils/dateUtils";
 import { TFile } from "obsidian";
 
 type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen" | "excluded";
@@ -1556,24 +1556,13 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		}
 	}
 
-	/** Returns true if the task should not be shown (does not satisfy view filters). */
+	/** Returns true if the task should not be shown (completed for the view's target date). */
 	private isTaskOutOfBoundsForView(task: TaskInfo): boolean {
 		const targetDate = createUTCDateFromLocalCalendarDate(getTodayLocal());
 		const completedStatuses = this.plugin.statusManager.getCompletedStatuses();
 		const completedStatus = completedStatuses[0];
 		const effectiveStatus = getEffectiveTaskStatus(task, targetDate, completedStatus);
-		if (this.plugin.statusManager.isCompletedStatus(effectiveStatus)) {
-			return true; // completed for today (recurring) or completed status (non-recurring)
-		}
-		// Recurring: if next uncompleted instance is strictly after today, nothing due today or overdue
-		if (task.recurrence) {
-			const nextOccurrence = getNextUncompletedOccurrence(task, targetDate);
-			if (!nextOccurrence) return true;
-			const nextStr = formatDateForStorage(nextOccurrence);
-			const todayStr = formatDateForStorage(targetDate);
-			if (nextStr > todayStr) return true;
-		}
-		return false;
+		return this.plugin.statusManager.isCompletedStatus(effectiveStatus);
 	}
 
 	/** Find which quadrant currently contains a task card with the given path. */
