@@ -5,6 +5,8 @@ import { TaskInfo } from "../types";
 import { identifyTaskNotesFromBasesData } from "./helpers";
 import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
+import { getEffectiveTaskStatus } from "../utils/helpers";
+import { createUTCDateFromLocalCalendarDate, getTodayLocal } from "../utils/dateUtils";
 import { TFile } from "obsidian";
 
 type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen" | "excluded";
@@ -262,12 +264,26 @@ export class EisenhowerMatrixView extends BasesViewBase {
 				return;
 			}
 
+			// Merge in latest task data from cache (e.g. after marking recurring complete)
+			// so tasks that are now out of bounds (e.g. completed for today) can be filtered out
+			const mergedTasks = taskNotes.map((task) => this.taskInfoCache.get(task.path) ?? task);
+			const targetDate = createUTCDateFromLocalCalendarDate(getTodayLocal());
+			const completedStatuses = this.plugin.statusManager.getCompletedStatuses();
+			const completedStatus = completedStatuses[0];
+			const taskNotesFiltered = mergedTasks.filter((task) => {
+				const effectiveStatus = getEffectiveTaskStatus(task, targetDate, completedStatus);
+				return !this.plugin.statusManager.isCompletedStatus(effectiveStatus);
+			});
+
+			// Use filtered list for categorization (replaces taskNotes from here on)
+			const taskNotesForRender = taskNotesFiltered;
+
 			// Clean up existing scrollers
 			this.destroyQuadrantScrollers();
 			
 			// Only clear matrix if we're actually going to render new content
 			// Don't clear if we're just going to exit early
-			if (taskNotes.length === 0) {
+			if (taskNotesForRender.length === 0) {
 				// Only clear if we need to show empty state
 				this.matrixContainer.empty();
 				this.renderEmptyState();
@@ -321,7 +337,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			}
 			
 			// Categorize tasks into quadrants
-			const quadrants = this.categorizeTasks(taskNotes);
+			const quadrants = this.categorizeTasks(taskNotesForRender);
 
 			// Apply custom ordering to each quadrant's tasks
 			this.applyOrderingToQuadrants(quadrants);
@@ -1525,15 +1541,14 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		
 		// Update cache
 		this.taskInfoCache.set(task.path, task);
-		
+		// Invalidate render skip so the next refresh re-runs merge/filter and removes tasks now out of bounds
+		this._lastDataHash = null;
+
 		// If we just did a selective update, skip this task update too
 		// The UI is already up to date from the selective update
 		if (this.justDidSelectiveUpdate || this.skipDataUpdateCount > 0) {
 			return;
 		}
-		
-		// Don't refresh here - onDataUpdated() will handle it if needed
-		// But we've already blocked it above during cooldown
 	}
 
 	private createVirtualQuadrant(
