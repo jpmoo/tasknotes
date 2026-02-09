@@ -626,10 +626,11 @@ export function getOldestIncompleteInstanceBefore(
 				start = task.scheduled ? parseDateToUTC(task.scheduled) : end;
 			}
 		} else {
-			start = task.scheduled
+			const scheduledOrCreated = task.scheduled
 				? parseDateToUTC(task.scheduled)
 				: (task.dateCreated ? parseDateToUTC(task.dateCreated) : null);
-			if (!start || start > end) return null;
+			if (!scheduledOrCreated || scheduledOrCreated > end) return null;
+			start = scheduledOrCreated;
 		}
 		if (start > end) return null;
 		const occurrences = generateRecurringInstances(task, start, end);
