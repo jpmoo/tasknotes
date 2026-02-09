@@ -5,8 +5,8 @@ import { TaskInfo } from "../types";
 import { identifyTaskNotesFromBasesData } from "./helpers";
 import { createTaskCard } from "../ui/TaskCard";
 import { VirtualScroller } from "../utils/VirtualScroller";
-import { getEffectiveTaskStatus } from "../utils/helpers";
-import { createUTCDateFromLocalCalendarDate, getTodayLocal } from "../utils/dateUtils";
+import { getEffectiveTaskStatus, getNextUncompletedOccurrence } from "../utils/helpers";
+import { createUTCDateFromLocalCalendarDate, formatDateForStorage, getTodayLocal } from "../utils/dateUtils";
 import { TFile } from "obsidian";
 
 type Quadrant = "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important" | "holding-pen" | "excluded";
@@ -270,10 +270,7 @@ export class EisenhowerMatrixView extends BasesViewBase {
 			const targetDate = createUTCDateFromLocalCalendarDate(getTodayLocal());
 			const completedStatuses = this.plugin.statusManager.getCompletedStatuses();
 			const completedStatus = completedStatuses[0];
-			const taskNotesFiltered = mergedTasks.filter((task) => {
-				const effectiveStatus = getEffectiveTaskStatus(task, targetDate, completedStatus);
-				return !this.plugin.statusManager.isCompletedStatus(effectiveStatus);
-			});
+			const taskNotesFiltered = mergedTasks.filter((task) => !this.isTaskOutOfBoundsForView(task));
 
 			// Use filtered list for categorization (replaces taskNotes from here on)
 			const taskNotesForRender = taskNotesFiltered;
@@ -1545,10 +1542,59 @@ export class EisenhowerMatrixView extends BasesViewBase {
 		this._lastDataHash = null;
 
 		// If we just did a selective update, skip this task update too
-		// The UI is already up to date from the selective update
 		if (this.justDidSelectiveUpdate || this.skipDataUpdateCount > 0) {
 			return;
 		}
+
+		// If task is now out of bounds (e.g. completed, or recurring with nothing due today/overdue),
+		// remove it from the matrix immediately so it disappears without waiting for Bases to refresh
+		if (this.isTaskOutOfBoundsForView(task)) {
+			const quadrant = this.findQuadrantContainingTaskPath(task.path);
+			if (quadrant && this.matrixContainer) {
+				await this.updateQuadrantSelectivelyByPath(quadrant, task.path, 'remove');
+			}
+		}
+	}
+
+	/** Returns true if the task should not be shown (does not satisfy view filters). */
+	private isTaskOutOfBoundsForView(task: TaskInfo): boolean {
+		const targetDate = createUTCDateFromLocalCalendarDate(getTodayLocal());
+		const completedStatuses = this.plugin.statusManager.getCompletedStatuses();
+		const completedStatus = completedStatuses[0];
+		const effectiveStatus = getEffectiveTaskStatus(task, targetDate, completedStatus);
+		if (this.plugin.statusManager.isCompletedStatus(effectiveStatus)) {
+			return true; // completed for today (recurring) or completed status (non-recurring)
+		}
+		// Recurring: if next uncompleted instance is strictly after today, nothing due today or overdue
+		if (task.recurrence) {
+			const nextOccurrence = getNextUncompletedOccurrence(task, targetDate);
+			if (!nextOccurrence) return true;
+			const nextStr = formatDateForStorage(nextOccurrence);
+			const todayStr = formatDateForStorage(targetDate);
+			if (nextStr > todayStr) return true;
+		}
+		return false;
+	}
+
+	/** Find which quadrant currently contains a task card with the given path. */
+	private findQuadrantContainingTaskPath(taskPath: string): Quadrant | null {
+		if (!this.matrixContainer) return null;
+		const quadrantIds: Quadrant[] = [
+			"urgent-important", "urgent-not-important", "not-urgent-important", "not-urgent-not-important",
+			"holding-pen", "excluded"
+		];
+		for (const quadrantId of quadrantIds) {
+			const quadrant = this.matrixContainer.querySelector(`.eisenhower-matrix__quadrant--${quadrantId}`);
+			if (!quadrant) continue;
+			const tasksContainer = quadrant.querySelector('.eisenhower-matrix__quadrant-tasks');
+			if (!tasksContainer) continue;
+			const wrapper = tasksContainer.querySelector(`[data-task-path="${CSS.escape(taskPath)}"]`)
+				|| Array.from(tasksContainer.querySelectorAll('.eisenhower-matrix__card-wrapper')).find(
+					(el) => (el as HTMLElement).getAttribute('data-task-path') === taskPath
+				);
+			if (wrapper) return quadrantId;
+		}
+		return null;
 	}
 
 	private createVirtualQuadrant(
