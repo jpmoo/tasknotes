@@ -22,6 +22,7 @@ import {
 import {
 	addDTSTARTToRecurrenceRule,
 	calculateDefaultDate,
+	getInstanceDateToComplete,
 	updateDTSTARTInRecurrenceRule,
 	ensureFolderExists,
 	updateToNextScheduledOccurrence,
@@ -1923,14 +1924,15 @@ export class TaskService {
 		}
 
 		// Default to local today instead of selectedDate for recurring task completion
-		// This ensures completion is recorded for user's actual calendar day unless explicitly overridden
 		const targetDate =
 			date ||
 			(() => {
 				const todayLocal = getTodayLocal();
 				return createUTCDateFromLocalCalendarDate(todayLocal);
 			})();
-		const dateStr = formatDateForStorage(targetDate);
+		// Choose which instance to complete: today if due today, else oldest past incomplete, else next open
+		const instanceDate = getInstanceDateToComplete(freshTask, targetDate);
+		const dateStr = formatDateForStorage(instanceDate);
 
 		// Check current completion status for this date using fresh data
 		const completeInstances = Array.isArray(freshTask.complete_instances)
@@ -2083,7 +2085,7 @@ export class TaskService {
 				await this.webhookNotifier.triggerWebhook("recurring.instance.completed", {
 					task: updatedTask,
 					date: dateStr,
-					targetDate: targetDate,
+					targetDate: instanceDate,
 				});
 			} catch (webhookError) {
 				console.error("Error triggering recurring task completion webhook:", webhookError);

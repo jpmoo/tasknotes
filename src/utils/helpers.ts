@@ -566,8 +566,12 @@ export function generateRecurringInstances(task: TaskInfo, startDate: Date, endD
 /**
  * Calculates the next uncompleted occurrence for a recurring task
  * Returns null if no future occurrences exist
+ * @param referenceDate If provided, "today" is this date (e.g. view's target date); otherwise uses actual today
  */
-export function getNextUncompletedOccurrence(task: TaskInfo): Date | null {
+export function getNextUncompletedOccurrence(
+	task: TaskInfo,
+	referenceDate?: Date
+): Date | null {
 	// If no recurrence, return null
 	if (!task.recurrence) {
 		return null;
@@ -576,15 +580,90 @@ export function getNextUncompletedOccurrence(task: TaskInfo): Date | null {
 	const anchor = task.recurrence_anchor || 'scheduled'; // Default to scheduled
 
 	if (anchor === 'completion') {
-		// For completion-based recurrence, DTSTART is updated on each completion
-		// So we just need to get the next occurrence from the RRULE
-		// We don't filter by complete_instances because the DTSTART has already been shifted
-		return getNextCompletionBasedOccurrence(task);
+		return getNextCompletionBasedOccurrence(task, referenceDate);
 	} else {
-		// For scheduled-based recurrence, DTSTART is fixed
-		// We need to generate occurrences and filter out completed ones
-		return getNextScheduledBasedOccurrence(task);
+		return getNextScheduledBasedOccurrence(task, referenceDate);
 	}
+}
+
+/**
+ * Returns the oldest incomplete (not completed, not skipped) occurrence strictly before the given date.
+ * Used when completing a recurring task "from the past" (e.g. catching up).
+ */
+export function getOldestIncompleteInstanceBefore(
+	task: TaskInfo,
+	beforeDate: Date
+): Date | null {
+	if (!task.recurrence || typeof task.recurrence !== 'string') {
+		return null;
+	}
+	try {
+		const processed = new Set([
+			...(task.complete_instances || []),
+			...(task.skipped_instances || []),
+		]);
+		// End of range: day before beforeDate (UTC)
+		const end = new Date(Date.UTC(
+			beforeDate.getUTCFullYear(),
+			beforeDate.getUTCMonth(),
+			beforeDate.getUTCDate() - 1,
+			23, 59, 59, 999
+		));
+		let start: Date;
+		if (task.recurrence.includes("DTSTART:")) {
+			const dtstartMatch = task.recurrence.match(/DTSTART:(\d{8}(?:T\d{6}Z?)?)/);
+			if (dtstartMatch) {
+				const s = dtstartMatch[1];
+				if (s.length >= 8) {
+					const year = parseInt(s.slice(0, 4));
+					const month = parseInt(s.slice(4, 6)) - 1;
+					const day = parseInt(s.slice(6, 8));
+					start = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+				} else {
+					start = end;
+				}
+			} else {
+				start = task.scheduled ? parseDateToUTC(task.scheduled) : end;
+			}
+		} else {
+			start = task.scheduled
+				? parseDateToUTC(task.scheduled)
+				: (task.dateCreated ? parseDateToUTC(task.dateCreated) : null);
+			if (!start || start > end) return null;
+		}
+		if (start > end) return null;
+		const occurrences = generateRecurringInstances(task, start, end);
+		for (const occ of occurrences) {
+			const str = formatDateForStorage(occ);
+			if (!processed.has(str)) return occ;
+		}
+		return null;
+	} catch (e) {
+		console.error("Error in getOldestIncompleteInstanceBefore:", e);
+		return null;
+	}
+}
+
+/**
+ * Chooses which instance date to complete when the user marks a recurring task complete.
+ * - If today is the task's current due/scheduled date → use today (normal).
+ * - Else step backward to the oldest incomplete instance before today and use that.
+ * - If all past instances are complete → use the next open instance (on or after today).
+ */
+export function getInstanceDateToComplete(task: TaskInfo, today: Date): Date {
+	const todayStr = formatDateForStorage(today);
+	const currentInstanceStr =
+		(task.scheduled && formatDateForStorage(parseDateToUTC(task.scheduled))) ||
+		(task.due && formatDateForStorage(parseDateToUTC(task.due))) ||
+		null;
+	if (currentInstanceStr === todayStr) {
+		return new Date(today.getTime());
+	}
+	const oldestPast = getOldestIncompleteInstanceBefore(task, today);
+	if (oldestPast) return oldestPast;
+	const nextOpen = getNextUncompletedOccurrence(task, today);
+	if (nextOpen) return nextOpen;
+	return new Date(today.getTime());
 }
 
 function parseIntervalFromRecurrence(recurrence: string): number {
@@ -594,16 +673,20 @@ function parseIntervalFromRecurrence(recurrence: string): number {
 
 /**
  * Gets next occurrence for scheduled-based (fixed) recurrence
+ * @param referenceDate If provided, "today" is this date; otherwise uses getTodayString()
  */
-function getNextScheduledBasedOccurrence(task: TaskInfo): Date | null {
+function getNextScheduledBasedOccurrence(
+	task: TaskInfo,
+	referenceDate?: Date
+): Date | null {
 	if (!task.recurrence) {
 		return null;
 	}
 
 	try {
-		// Get current date as starting point using UTC anchor principle
-		const todayStr = getTodayString(); // YYYY-MM-DD format
-		const today = parseDateToUTC(todayStr); // UTC anchored for consistent logic
+		const today = referenceDate
+			? new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate(), 0, 0, 0, 0))
+			: parseDateToUTC(getTodayString());
 
 		// Determine look-ahead period based on recurrence frequency
 		// This ensures we can find at least one future occurrence
@@ -671,16 +754,20 @@ function getNextScheduledBasedOccurrence(task: TaskInfo): Date | null {
  * Gets next occurrence for completion-based (flexible) recurrence
  * For completion-based recurrence, the DTSTART in the RRULE is updated on each completion
  * to the completion date, so we simply get the next occurrence from the current DTSTART
+ * @param referenceDate If provided, "today" is this date; otherwise uses getTodayString()
  */
-function getNextCompletionBasedOccurrence(task: TaskInfo): Date | null {
+function getNextCompletionBasedOccurrence(
+	task: TaskInfo,
+	referenceDate?: Date
+): Date | null {
 	if (!task.recurrence || typeof task.recurrence !== 'string') {
 		return null;
 	}
 
 	try {
-		// Get current date as starting point using UTC anchor principle
-		const todayStr = getTodayString(); // YYYY-MM-DD format
-		const today = parseDateToUTC(todayStr); // UTC anchored for consistent logic
+		const today = referenceDate
+			? new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate(), 0, 0, 0, 0))
+			: parseDateToUTC(getTodayString());
 
 		// Determine look-ahead period based on recurrence frequency
 		// This ensures we can find at least one future occurrence
